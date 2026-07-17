@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  # Distinct databases. The test suite truncates its own; it must never be
+  # pointed at the one migrate/seed just populated.
+  DATABASE_URL: postgresql://ralia:ralia_ci@localhost:5432/ralia_ci?schema=public
+  TEST_DATABASE_URL: postgresql://ralia:ralia_ci@localhost:5432/ralia_ci_test?schema=public
+  JWT_ACCESS_SECRET: ci_access_secret_not_used_outside_ci
+  JWT_REFRESH_SECRET: ci_refresh_secret_not_used_outside_ci
+  FIELD_ENCRYPTION_KEY: ci_field_key_not_used_outside_ci
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ralia
+          POSTGRES_PASSWORD: ralia_ci
+          POSTGRES_DB: ralia_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ralia -d ralia_ci"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx prisma generate
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+      - name: Migrations apply clean
+        run: npx prisma migrate deploy
+
+      - name: Create shadow database
+        # migrate diff replays the migration history into the shadow DB and
+        # resets it. It must never point at DATABASE_URL.
+        run: psql "$DATABASE_URL" -c 'CREATE DATABASE ralia_shadow;'
+
+      - name: Schema matches migrations
+        # Fails if schema.prisma has drifted from the migration history —
+        # catches a hand-edited schema that was never migrated.
+        run: |
+          npx prisma migrate diff \
+            --from-migrations ./prisma/migrations \
+            --to-schema-datamodel ./prisma/schema.prisma \
+            --shadow-database-url postgresql://ralia:ralia_ci@localhost:5432/ralia_shadow \
+            --exit-code
+
+      - name: Seed
+        run: npm run seed
+
+      # Creates and migrates TEST_DATABASE_URL itself via test/global-setup.ts.
+      # The ledger property test dominates this step — that is the point of it.
+      - name: Test
+        run: npm test
+
+  # Staging deploy — blocked on client-funded infra (Phase 0 milestone
+  # "Infrastructure accounts in Ralia's name"). Wire the runtime here once the
+  # host exists; the gate is provisioning, not this file.
+  #
+  # deploy-staging:
+  #   needs: verify
+  #   if: github.ref == 'refs/heads/main'
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Deploy
+  #       run: echo "TODO: deploy once staging infra is provisioned"

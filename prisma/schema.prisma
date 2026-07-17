@@ -1,0 +1,818 @@
+// Ralia MVP — frozen data model.
+// Source: Claude Code Handoff (DSD-RALIA-CC-R02) §4, with three contract decisions
+// recorded in docs/BACKEND_PLAN.md §05:
+//   1. Campaign states follow the Screen Flows list + CANCELLED.
+//   2. Account status (users) and promoter approval status (promoter_profiles) are separate.
+//   3. Withdrawal minimum lives in rate_config.
+//
+// Rules that this file encodes and that code must not undo:
+//   - Money is BigInt minor units (kobo). Never Float. Ever.
+//   - There is NO balance column anywhere. Balances are SUM(ledger_entries).
+//   - ledger_* and audit_log are append-only.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Identity
+// ─────────────────────────────────────────────────────────────
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+enum Role {
+  CLIENT
+  PROMOTER
+  ADMIN
+}
+
+enum AdminCapability {
+  REVIEW_EVIDENCE
+  RECORD_MONEY
+}
+
+enum OtpPurpose {
+  PHONE_VERIFY
+  LOGIN
+  PASSWORD_RESET
+}
+
+enum ConsentPurpose {
+  TERMS_OF_SERVICE
+  PRIVACY_POLICY
+  DATA_RELIGION
+  DATA_GENDER
+  DATA_DOB
+  MARKETING_EMAIL
+  MARKETING_WHATSAPP
+}
+
+enum ClientOrgStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+model User {
+  id              String     @id @default(uuid()) @db.Uuid
+  email           String     @unique
+  phoneE164       String     @unique @map("phone_e164")
+  passwordHash    String     @map("password_hash")
+  status          UserStatus @default(PENDING)
+  emailVerifiedAt DateTime?  @map("email_verified_at")
+  phoneVerifiedAt DateTime?  @map("phone_verified_at")
+  // Soft-delete: legally required for users only (handoff §2). An erasure request
+  // anonymises the row and preserves ledger postings.
+  deletedAt       DateTime?  @map("deleted_at")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  roles            UserRole[]
+  otpCodes         OtpCode[]
+  consents         Consent[]
+  sessions         Session[]
+  clientOrgs       ClientOrg[]
+  promoterProfile  PromoterProfile?
+  bankAccounts     PromoterBankAccount[]
+  channels         Channel[]
+  offers           Offer[]
+  assignments      Assignment[]
+  withdrawals      Withdrawal[]
+  auditEntries     AuditLog[]           @relation("AuditActor")
+  approvedProfiles PromoterProfile[]    @relation("ProfileApprover")
+  approvedCampaigns Campaign[]          @relation("CampaignApprover")
+  reviewedSubmissions Submission[]      @relation("SubmissionReviewer")
+  approvedWithdrawals Withdrawal[]      @relation("WithdrawalApprover")
+  createdTransactions LedgerTransaction[] @relation("TransactionCreator")
+  uploadedFiles    File[]               @relation("FileUploader")
+
+  @@index([status])
+  @@map("users")
+}
+
+model UserRole {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  role      Role
+  // Admins only. Held per-capability so evidence review and money recording are
+  // separable by role, per handoff §7 — do not collapse these into one flag.
+  capabilities AdminCapability[]
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role])
+  @@map("user_roles")
+}
+
+model OtpCode {
+  id         String     @id @default(uuid()) @db.Uuid
+  userId     String     @map("user_id") @db.Uuid
+  purpose    OtpPurpose
+  codeHash   String     @map("code_hash")
+  expiresAt  DateTime   @map("expires_at")
+  consumedAt DateTime?  @map("consumed_at")
+  attempts   Int        @default(0)
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, consumedAt])
+  @@map("otp_codes")
+}
+
+model Consent {
+  id            String         @id @default(uuid()) @db.Uuid
+  userId        String         @map("user_id") @db.Uuid
+  purpose       ConsentPurpose
+  granted       Boolean
+  grantedAt     DateTime?      @map("granted_at")
+  revokedAt     DateTime?      @map("revoked_at")
+  policyVersion String         @map("policy_version")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@map("consents")
+}
+
+model Session {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  refreshTokenHash String    @unique @map("refresh_token_hash")
+  expiresAt        DateTime  @map("expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+  userAgent        String?   @map("user_agent")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@map("sessions")
+}
+
+model ClientOrg {
+  id            String          @id @default(uuid()) @db.Uuid
+  ownerUserId   String          @map("owner_user_id") @db.Uuid
+  name          String
+  industry      String?
+  phoneWhatsapp String?         @map("phone_whatsapp")
+  status        ClientOrgStatus @default(PENDING)
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  owner     User       @relation(fields: [ownerUserId], references: [id])
+  campaigns Campaign[]
+
+  @@index([ownerUserId])
+  @@map("client_orgs")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Promoter profile & channels
+// ─────────────────────────────────────────────────────────────
+
+enum PromoterStatus {
+  PROFILE_INCOMPLETE
+  AWAITING_APPROVAL
+  REJECTED
+  ACTIVE
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum Platform {
+  WHATSAPP_STATUS
+  WHATSAPP_GROUP
+  INSTAGRAM
+  X
+  TIKTOK
+  FACEBOOK
+  TELEGRAM
+  LINKEDIN
+  OFFLINE
+}
+
+enum VerificationTier {
+  SELF
+  SCREENSHOT
+  INSIGHTS
+}
+
+enum ChannelStatus {
+  PENDING_REVIEW
+  ACTIVE
+  REJECTED
+}
+
+model PromoterProfile {
+  userId String @id @map("user_id") @db.Uuid
+
+  // Fields the matching filter reads (handoff §5.3) — exposed by the thin API.
+  status             PromoterStatus @default(PROFILE_INCOMPLETE)
+  dob                DateTime?      @db.Date
+  age                Int?
+  locationState      String?        @map("location_state")
+  languagesSpoken    String[]       @map("languages_spoken")
+  preferredCategories String[]      @map("preferred_categories")
+  maxCampaignsPerWeek Int           @default(3) @map("max_campaigns_per_week")
+  trustScore         Decimal        @default(50) @map("trust_score") @db.Decimal(5, 2)
+
+  // Remaining questionnaire surface. Columns exist from day one; the API exposes
+  // them in the B3 harden slice (docs/BACKEND_PLAN.md §03).
+  fullName          String?  @map("full_name")
+  gender            Gender?
+  preferredLanguage String?  @map("preferred_language")
+  educationLevel    String?  @map("education_level")
+  qualifications    String?
+  fieldOfStudy      String?  @map("field_of_study")
+  occupation        String?
+  industry          String?
+  employmentStatus  String?  @map("employment_status")
+  countriesTravelled String[] @map("countries_travelled")
+  religion          String?
+  locationLga       String?  @map("location_lga")
+  countryResidence  String?  @map("country_residence")
+  countryBirth      String?  @map("country_birth")
+  hobbies           String[]
+  cameraComfortable Boolean? @map("camera_comfortable")
+  skills            String[]
+  deviceInfo        Json?    @map("device_info")
+
+  approvedBy String?   @map("approved_by") @db.Uuid
+  approvedAt DateTime? @map("approved_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  user     User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  approver User? @relation("ProfileApprover", fields: [approvedBy], references: [id])
+
+  @@index([status, trustScore])
+  @@index([locationState])
+  @@map("promoter_profiles")
+}
+
+model PromoterBankAccount {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  bankCode String @map("bank_code")
+  // Encrypted at rest with FIELD_ENCRYPTION_KEY — a different key from the DB
+  // credential (handoff §7). Never logged, never returned unmasked.
+  accountNumberEnc String  @map("account_number_enc")
+  accountNumberLast4 String @map("account_number_last4")
+  accountName      String  @map("account_name")
+  isDefault        Boolean @default(false) @map("is_default")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  withdrawals Withdrawal[]
+
+  @@index([userId])
+  @@map("promoter_bank_accounts")
+}
+
+model Channel {
+  id                String           @id @default(uuid()) @db.Uuid
+  promoterId        String           @map("promoter_id") @db.Uuid
+  platform          Platform
+  handle            String?
+  url               String?
+  claimedAudience   Int              @map("claimed_audience")
+  isGroup           Boolean          @default(false) @map("is_group")
+  isGroupAdmin      Boolean          @default(false) @map("is_group_admin")
+  groupMembers      Int?             @map("group_members")
+  activeParticipants Int?            @map("active_participants")
+  verificationTier  VerificationTier @default(SELF) @map("verification_tier")
+  evidenceFileId    String?          @map("evidence_file_id") @db.Uuid
+  // Computed server-side from §5.1. Never accepted from the client.
+  effectiveReach    Int              @default(0) @map("effective_reach")
+  status            ChannelStatus    @default(PENDING_REVIEW)
+  adminFrozen       Boolean          @default(false) @map("admin_frozen")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+
+  promoter     User         @relation(fields: [promoterId], references: [id], onDelete: Cascade)
+  evidenceFile File?        @relation(fields: [evidenceFileId], references: [id])
+  offers       Offer[]
+  assignments  Assignment[]
+
+  @@index([promoterId])
+  @@index([platform, effectiveReach])
+  @@map("channels")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Files
+// ─────────────────────────────────────────────────────────────
+// Not named in handoff §4, but §4 references file_id from three tables
+// (campaign_assets, channels.evidence_file_id, proof_artifacts). This is the
+// referent — storage plumbing, not a feature.
+
+model File {
+  id          String   @id @default(uuid()) @db.Uuid
+  storageKey  String   @unique @map("storage_key")
+  bucket      String
+  mimeType    String   @map("mime_type")
+  sizeBytes   Int      @map("size_bytes")
+  checksumSha256 String @map("checksum_sha256")
+  uploadedBy  String?  @map("uploaded_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  uploader       User?           @relation("FileUploader", fields: [uploadedBy], references: [id])
+  campaignAssets CampaignAsset[]
+  channels       Channel[]
+  proofArtifacts ProofArtifact[]
+
+  @@map("files")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Campaigns
+// ─────────────────────────────────────────────────────────────
+
+enum CampaignObjective {
+  AWARENESS
+  APP_INSTALL
+  WEBSITE_VISIT
+  PURCHASE
+  LEAD_GEN
+}
+
+enum CampaignStatus {
+  DRAFT
+  QUOTED
+  PENDING_APPROVAL
+  REJECTED
+  CONFIRMING_PAYMENT
+  LIVE
+  PAUSED
+  ENDED
+  FULFILLED
+  SETTLED
+  CANCELLED
+}
+
+enum AssetKind {
+  IMAGE
+  VIDEO
+  DOCUMENT
+  POSTER
+  CAPTION
+  LOGO
+}
+
+enum PromoterRole {
+  DISTRIBUTOR
+  CREATOR
+  PARTICIPATOR
+  INFLUENCER
+}
+
+enum SlotStatus {
+  OPEN
+  OFFERED
+  FILLED
+  CANCELLED
+}
+
+model Campaign {
+  id                  String            @id @default(uuid()) @db.Uuid
+  clientOrgId         String            @map("client_org_id") @db.Uuid
+  name                String
+  objective           CampaignObjective
+  description         String?
+  promoterInstructions String?          @map("promoter_instructions")
+  destinationUrl      String?           @map("destination_url")
+  status              CampaignStatus    @default(DRAFT)
+  needsCreative       Boolean           @default(false) @map("needs_creative")
+  budgetMinor         BigInt            @map("budget_minor")
+  // The price this campaign was quoted. Frozen at quote time — a later
+  // rate_config change must never reprice it (handoff §5.2).
+  priceMinor          BigInt?           @map("price_minor")
+  quotedAt            DateTime?         @map("quoted_at")
+  escrowAccountId     String?           @unique @map("escrow_account_id") @db.Uuid
+  slotsTotal          Int               @default(0) @map("slots_total")
+  slotsFilled         Int               @default(0) @map("slots_filled")
+  startsAt            DateTime?         @map("starts_at")
+  endsAt              DateTime?         @map("ends_at")
+  approvedBy          String?           @map("approved_by") @db.Uuid
+  approvedAt          DateTime?         @map("approved_at")
+  rejectReason        String?           @map("reject_reason")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+
+  clientOrg    ClientOrg          @relation(fields: [clientOrgId], references: [id])
+  escrowAccount Account?          @relation(fields: [escrowAccountId], references: [id])
+  approver     User?              @relation("CampaignApprover", fields: [approvedBy], references: [id])
+  assets       CampaignAsset[]
+  targeting    CampaignTargeting?
+  slots        CampaignSlot[]
+  offers       Offer[]
+  assignments  Assignment[]
+
+  @@index([clientOrgId, status])
+  @@index([status])
+  @@map("campaigns")
+}
+
+model CampaignAsset {
+  id          String    @id @default(uuid()) @db.Uuid
+  campaignId  String    @map("campaign_id") @db.Uuid
+  kind        AssetKind
+  fileId      String?   @map("file_id") @db.Uuid
+  captionText String?   @map("caption_text")
+  orderIndex  Int       @default(0) @map("order_index")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  file     File?    @relation(fields: [fileId], references: [id])
+
+  @@index([campaignId, orderIndex])
+  @@map("campaign_assets")
+}
+
+model CampaignTargeting {
+  campaignId       String   @id @map("campaign_id") @db.Uuid
+  states           String[]
+  lgas             String[]
+  ageMin           Int?     @map("age_min")
+  ageMax           Int?     @map("age_max")
+  genders          String[]
+  languages        String[]
+  categories       String[]
+  platforms        String[]
+  minEffectiveReach Int     @default(0) @map("min_effective_reach")
+  roles            String[]
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@map("campaign_targeting")
+}
+
+model CampaignSlot {
+  id             String       @id @default(uuid()) @db.Uuid
+  campaignId     String       @map("campaign_id") @db.Uuid
+  role           PromoterRole
+  unitPriceMinor BigInt       @map("unit_price_minor")
+  status         SlotStatus   @default(OPEN)
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  offers   Offer[]
+
+  @@index([campaignId, status])
+  @@map("campaign_slots")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Matching, offers, assignments
+// ─────────────────────────────────────────────────────────────
+
+enum OfferStatus {
+  SENT
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  WITHDRAWN
+}
+
+enum AssignmentStatus {
+  IN_PROGRESS
+  SUBMITTED
+  APPROVED
+  REJECTED
+  PAID
+  CANCELLED
+}
+
+model Offer {
+  id         String       @id @default(uuid()) @db.Uuid
+  campaignId String       @map("campaign_id") @db.Uuid
+  promoterId String       @map("promoter_id") @db.Uuid
+  channelId  String       @map("channel_id") @db.Uuid
+  slotId     String       @map("slot_id") @db.Uuid
+  role       PromoterRole
+  score      Decimal?     @db.Decimal(6, 4)
+  feeMinor   BigInt       @map("fee_minor")
+  expiresAt  DateTime     @map("expires_at")
+  status     OfferStatus  @default(SENT)
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  campaign   Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  promoter   User         @relation(fields: [promoterId], references: [id])
+  channel    Channel      @relation(fields: [channelId], references: [id])
+  slot       CampaignSlot @relation(fields: [slotId], references: [id])
+  assignment Assignment?
+
+  @@unique([campaignId, promoterId])
+  @@index([promoterId, status])
+  @@index([status, expiresAt])
+  @@map("offers")
+}
+
+model Assignment {
+  id            String           @id @default(uuid()) @db.Uuid
+  offerId       String           @unique @map("offer_id") @db.Uuid
+  campaignId    String           @map("campaign_id") @db.Uuid
+  promoterId    String           @map("promoter_id") @db.Uuid
+  channelId     String           @map("channel_id") @db.Uuid
+  role          PromoterRole
+  feeMinor      BigInt           @map("fee_minor")
+  trackingToken String           @unique @map("tracking_token")
+  status        AssignmentStatus @default(IN_PROGRESS)
+  dueAt         DateTime?        @map("due_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  offer        Offer         @relation(fields: [offerId], references: [id])
+  campaign     Campaign      @relation(fields: [campaignId], references: [id])
+  promoter     User          @relation(fields: [promoterId], references: [id])
+  channel      Channel       @relation(fields: [channelId], references: [id])
+  trackingLink TrackingLink?
+  submissions  Submission[]
+
+  @@index([promoterId, status])
+  @@index([campaignId, status])
+  @@map("assignments")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Tracking & evidence
+// ─────────────────────────────────────────────────────────────
+
+enum Verdict {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model TrackingLink {
+  token          String   @id
+  assignmentId   String   @unique @map("assignment_id") @db.Uuid
+  destinationUrl String   @map("destination_url")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  assignment  Assignment   @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  clickEvents ClickEvent[]
+
+  @@map("tracking_links")
+}
+
+model ClickEvent {
+  id       String   @id @default(uuid()) @db.Uuid
+  token    String
+  ts       DateTime @default(now())
+  ipHash   String   @map("ip_hash")
+  uaHash   String   @map("ua_hash")
+  isBot    Boolean  @default(false) @map("is_bot")
+  referrer String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  trackingLink TrackingLink @relation(fields: [token], references: [token], onDelete: Cascade)
+
+  @@index([token, ts])
+  @@index([token, isBot])
+  @@map("click_events")
+}
+
+model Submission {
+  id           String    @id @default(uuid()) @db.Uuid
+  assignmentId String    @map("assignment_id") @db.Uuid
+  submittedAt  DateTime  @default(now()) @map("submitted_at")
+  publicUrl    String?   @map("public_url")
+  note         String?
+  autoFlag     Boolean   @default(false) @map("auto_flag")
+  verdict      Verdict   @default(PENDING)
+  reviewedBy   String?   @map("reviewed_by") @db.Uuid
+  reviewedAt   DateTime? @map("reviewed_at")
+  rejectReason String?   @map("reject_reason")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  assignment Assignment      @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  reviewer   User?           @relation("SubmissionReviewer", fields: [reviewedBy], references: [id])
+  artifacts  ProofArtifact[]
+
+  @@index([verdict, submittedAt])
+  @@index([assignmentId])
+  @@map("submissions")
+}
+
+model ProofArtifact {
+  id           String  @id @default(uuid()) @db.Uuid
+  submissionId String  @map("submission_id") @db.Uuid
+  fileId       String  @map("file_id") @db.Uuid
+  // Perceptual hash. reuseOfId points at the artifact this one duplicates.
+  phash        String
+  reuseOfId    String? @map("reuse_of_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  submission Submission      @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  file       File            @relation(fields: [fileId], references: [id])
+  reuseOf    ProofArtifact?  @relation("ArtifactReuse", fields: [reuseOfId], references: [id])
+  reusedBy   ProofArtifact[] @relation("ArtifactReuse")
+
+  @@index([phash])
+  @@index([submissionId])
+  @@map("proof_artifacts")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Ledger
+// ─────────────────────────────────────────────────────────────
+// INVARIANT: per transaction, sum(debits) = sum(credits).
+// There is deliberately no balance column. Balances are SUM(ledger_entries).
+
+enum AccountKind {
+  CLIENT_WALLET
+  CAMPAIGN_ESCROW
+  PROMOTER_AVAILABLE
+  RALIA_REVENUE
+  BANK_CLEARING
+}
+
+enum EntryDirection {
+  DEBIT
+  CREDIT
+}
+
+enum LedgerTransactionKind {
+  CAMPAIGN_FUNDING
+  SUBMISSION_PAYOUT
+  WITHDRAWAL_PAID
+  CAMPAIGN_REFUND
+  ADJUSTMENT
+}
+
+enum WithdrawalStatus {
+  REQUESTED
+  APPROVED
+  PAID
+  FAILED
+  REVERSED
+}
+
+model Account {
+  id        String      @id @default(uuid()) @db.Uuid
+  kind      AccountKind
+  ownerId   String?     @map("owner_id") @db.Uuid
+  currency  String      @default("NGN")
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  entries  LedgerEntry[]
+  campaign Campaign?
+
+  @@index([kind, ownerId])
+  @@map("accounts")
+}
+
+model LedgerTransaction {
+  id             String                @id @default(uuid()) @db.Uuid
+  kind           LedgerTransactionKind
+  referenceType  String                @map("reference_type")
+  referenceId    String                @map("reference_id")
+  idempotencyKey String                @unique @map("idempotency_key")
+  memo           String?
+  createdBy      String?               @map("created_by") @db.Uuid
+  createdAt      DateTime              @default(now()) @map("created_at")
+
+  entries LedgerEntry[]
+  creator User?         @relation("TransactionCreator", fields: [createdBy], references: [id])
+
+  @@index([referenceType, referenceId])
+  @@index([kind, createdAt])
+  @@map("ledger_transactions")
+}
+
+model LedgerEntry {
+  id            String         @id @default(uuid()) @db.Uuid
+  transactionId String         @map("transaction_id") @db.Uuid
+  accountId     String         @map("account_id") @db.Uuid
+  direction     EntryDirection
+  amountMinor   BigInt         @map("amount_minor")
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  transaction LedgerTransaction @relation(fields: [transactionId], references: [id])
+  account     Account           @relation(fields: [accountId], references: [id])
+
+  @@index([accountId])
+  @@index([transactionId])
+  @@map("ledger_entries")
+}
+
+model Withdrawal {
+  id            String           @id @default(uuid()) @db.Uuid
+  promoterId    String           @map("promoter_id") @db.Uuid
+  amountMinor   BigInt           @map("amount_minor")
+  bankAccountId String           @map("bank_account_id") @db.Uuid
+  status        WithdrawalStatus @default(REQUESTED)
+  approvedBy    String?          @map("approved_by") @db.Uuid
+  paidRef       String?          @map("paid_ref")
+  failureReason String?          @map("failure_reason")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  promoter    User                @relation(fields: [promoterId], references: [id])
+  bankAccount PromoterBankAccount @relation(fields: [bankAccountId], references: [id])
+  approver    User?               @relation("WithdrawalApprover", fields: [approvedBy], references: [id])
+
+  @@index([promoterId, status])
+  @@index([status])
+  @@map("withdrawals")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @map("actor_id") @db.Uuid
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  before     Json?
+  after      Json?
+  reason     String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+  @@map("audit_log")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Rate config
+// ─────────────────────────────────────────────────────────────
+// Single active row (handoff §5.2). Coefficients change without a deploy.
+// Changing this NEVER reprices a campaign that already quoted.
+
+model RateConfig {
+  id       String  @id @default(uuid()) @db.Uuid
+  isActive Boolean @default(false) @map("is_active")
+
+  // §5.2 pricing
+  rpmMinor            Int     @default(3000) @map("rpm_minor")
+  multAwareness       Decimal @default(1.0) @map("mult_awareness") @db.Decimal(4, 2)
+  multWebsiteVisit    Decimal @default(1.1) @map("mult_website_visit") @db.Decimal(4, 2)
+  multAppInstall      Decimal @default(1.25) @map("mult_app_install") @db.Decimal(4, 2)
+  multLeadGen         Decimal @default(1.4) @map("mult_lead_gen") @db.Decimal(4, 2)
+  multPurchase        Decimal @default(1.5) @map("mult_purchase") @db.Decimal(4, 2)
+  targetingStep       Decimal @default(0.05) @map("targeting_step") @db.Decimal(4, 2)
+  targetingCap        Decimal @default(1.35) @map("targeting_cap") @db.Decimal(4, 2)
+  takeRate            Decimal @default(0.30) @map("take_rate") @db.Decimal(4, 2)
+
+  // §5.1 effective reach — platform factors
+  factorWhatsappStatus Decimal @default(0.30) @map("factor_whatsapp_status") @db.Decimal(4, 2)
+  factorWhatsappGroup  Decimal @default(0.20) @map("factor_whatsapp_group") @db.Decimal(4, 2)
+  factorTelegram       Decimal @default(0.20) @map("factor_telegram") @db.Decimal(4, 2)
+  factorInstagram      Decimal @default(0.10) @map("factor_instagram") @db.Decimal(4, 2)
+  factorFacebook       Decimal @default(0.10) @map("factor_facebook") @db.Decimal(4, 2)
+  factorTiktok         Decimal @default(0.12) @map("factor_tiktok") @db.Decimal(4, 2)
+  factorX              Decimal @default(0.05) @map("factor_x") @db.Decimal(4, 2)
+  factorLinkedin       Decimal @default(0.12) @map("factor_linkedin") @db.Decimal(4, 2)
+  factorOffline        Decimal @default(0.15) @map("factor_offline") @db.Decimal(4, 2)
+
+  // §5.1 verification factors
+  factorTierSelf       Decimal @default(0.60) @map("factor_tier_self") @db.Decimal(4, 2)
+  factorTierScreenshot Decimal @default(1.00) @map("factor_tier_screenshot") @db.Decimal(4, 2)
+  factorTierInsights   Decimal @default(1.15) @map("factor_tier_insights") @db.Decimal(4, 2)
+
+  // Operational thresholds
+  offerExpiryHours       Int    @default(24) @map("offer_expiry_hours")
+  minTrustScore          Int    @default(30) @map("min_trust_score")
+  withdrawalMinimumMinor BigInt @default(500000) @map("withdrawal_minimum_minor") // ₦5,000
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("rate_config")
+}

@@ -1,0 +1,86 @@
+# Dev-only stack. Every port binds to 127.0.0.1 — nothing here is exposed to the network.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ralia-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ralia
+      POSTGRES_PASSWORD: ralia_dev_only
+      POSTGRES_DB: ralia
+    # 5433 on the host: this machine already runs a native postgres on 5432.
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ralia -d ralia"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: ralia-redis
+    restart: unless-stopped
+    # 6380 on the host: 6379 is taken by another project on this machine.
+    ports:
+      - "127.0.0.1:6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    container_name: ralia-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ralia_minio
+      MINIO_ROOT_PASSWORD: ralia_minio_dev_only
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Creates the bucket on first boot, then exits.
+  minio-init:
+    image: minio/mc:latest
+    container_name: ralia-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ralia_minio ralia_minio_dev_only &&
+      mc mb --ignore-existing local/ralia-dev &&
+      mc anonymous set none local/ralia-dev
+      "
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: ralia-mailpit
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
