@@ -11,7 +11,9 @@ import { CryptoModule } from './common/crypto/crypto.module';
 import { IdempotencyGuard } from './common/idempotency/idempotency.guard';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { RateConfigModule } from './common/rate-config/rate-config.module';
+import { StorageModule } from './common/storage/storage.module';
 import { HealthController } from './health/health.controller';
+import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
@@ -57,8 +59,10 @@ import { ProfilesModule } from './modules/profiles/profiles.module';
     PrismaModule,
     CryptoModule,
     RateConfigModule,
+    StorageModule,
     IdentityModule,
     ProfilesModule,
+    CampaignsModule,
     LedgerModule,
   ],
   controllers: [HealthController],

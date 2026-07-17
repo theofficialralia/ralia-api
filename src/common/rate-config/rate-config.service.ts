@@ -1,7 +1,13 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { Platform, Prisma, RateConfig, VerificationTier } from '@prisma/client';
+import { CampaignObjective, Platform, Prisma, RateConfig, VerificationTier } from '@prisma/client';
+import { PricingConfig } from '../pricing/pricing';
 import { ReachFactors } from '../reach/effective-reach';
 import { PrismaService } from '../prisma/prisma.service';
+
+/** A Decimal(4,2) → integer hundredths, exactly (1.25 → 125). */
+function toHundredths(d: Prisma.Decimal): number {
+  return Math.round(d.toNumber() * 100);
+}
 
 /**
  * The single active rate_config row — handoff §5.2. Coefficients change without
@@ -46,6 +52,24 @@ export class RateConfigService {
         [VerificationTier.SCREENSHOT]: n(c.factorTierScreenshot),
         [VerificationTier.INSIGHTS]: n(c.factorTierInsights),
       },
+    };
+  }
+
+  /** §5.2 pricing coefficients, as integer hundredths where they are multipliers. */
+  async getPricingConfig(): Promise<PricingConfig> {
+    const c = await this.getActive();
+    return {
+      rpmMinor: c.rpmMinor,
+      objectiveMultHundredths: {
+        [CampaignObjective.AWARENESS]: toHundredths(c.multAwareness),
+        [CampaignObjective.WEBSITE_VISIT]: toHundredths(c.multWebsiteVisit),
+        [CampaignObjective.APP_INSTALL]: toHundredths(c.multAppInstall),
+        [CampaignObjective.LEAD_GEN]: toHundredths(c.multLeadGen),
+        [CampaignObjective.PURCHASE]: toHundredths(c.multPurchase),
+      },
+      targetingStepHundredths: toHundredths(c.targetingStep),
+      targetingCapHundredths: toHundredths(c.targetingCap),
+      takeRateHundredths: toHundredths(c.takeRate),
     };
   }
 }
