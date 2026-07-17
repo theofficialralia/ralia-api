@@ -483,8 +483,9 @@ model CampaignSlot {
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
 
-  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  offers   Offer[]
+  campaign   Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  offers     Offer[]
+  assignment Assignment?
 
   @@index([campaignId, status])
   @@map("campaign_slots")
@@ -516,7 +517,9 @@ model Offer {
   campaignId String       @map("campaign_id") @db.Uuid
   promoterId String       @map("promoter_id") @db.Uuid
   channelId  String       @map("channel_id") @db.Uuid
-  slotId     String       @map("slot_id") @db.Uuid
+  // Nullable: the slot is reserved from the campaign's pool at accept time
+  // (concurrency-safe, oversell-proof), not pinned when the offer is sent.
+  slotId     String?      @map("slot_id") @db.Uuid
   role       PromoterRole
   score      Decimal?     @db.Decimal(6, 4)
   feeMinor   BigInt       @map("fee_minor")
@@ -528,7 +531,7 @@ model Offer {
   campaign   Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   promoter   User         @relation(fields: [promoterId], references: [id])
   channel    Channel      @relation(fields: [channelId], references: [id])
-  slot       CampaignSlot @relation(fields: [slotId], references: [id])
+  slot       CampaignSlot? @relation(fields: [slotId], references: [id])
   assignment Assignment?
 
   @@unique([campaignId, promoterId])
@@ -543,6 +546,8 @@ model Assignment {
   campaignId    String           @map("campaign_id") @db.Uuid
   promoterId    String           @map("promoter_id") @db.Uuid
   channelId     String           @map("channel_id") @db.Uuid
+  // The slot reserved at accept time. Unique: one slot fills exactly once.
+  slotId        String?          @unique @map("slot_id") @db.Uuid
   role          PromoterRole
   feeMinor      BigInt           @map("fee_minor")
   trackingToken String           @unique @map("tracking_token")
@@ -555,6 +560,7 @@ model Assignment {
   campaign     Campaign      @relation(fields: [campaignId], references: [id])
   promoter     User          @relation(fields: [promoterId], references: [id])
   channel      Channel       @relation(fields: [channelId], references: [id])
+  slot         CampaignSlot? @relation(fields: [slotId], references: [id])
   trackingLink TrackingLink?
   submissions  Submission[]
 

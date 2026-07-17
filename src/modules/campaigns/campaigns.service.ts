@@ -4,13 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  AccountKind,
-  Campaign,
-  CampaignStatus,
-  Prisma,
-  PromoterStatus,
-} from '@prisma/client';
+import { Campaign, CampaignStatus, Prisma } from '@prisma/client';
+import { buildEligibility } from '../../common/eligibility/eligibility';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
 import {
@@ -189,15 +184,29 @@ export class CampaignsService {
 
     const { count, reach } = await this.estimateEligible(filters);
 
-    await this.prisma.campaign.update({
-      where: { id: campaignId },
-      data: {
-        status: CampaignStatus.QUOTED,
-        priceMinor: totalPrice,
-        budgetMinor: totalPrice,
-        quotedAt: new Date(),
-      },
-    });
+    // Materialise the priced slots — the concurrency-safe units B5 reserves
+    // against. Safe to delete and recreate here: a campaign is only quotable
+    // while still editable, so no slot can yet be filled.
+    const role = (filters.roles[0] as never) ?? 'DISTRIBUTOR';
+    await this.prisma.$transaction([
+      this.prisma.campaignSlot.deleteMany({ where: { campaignId } }),
+      this.prisma.campaignSlot.createMany({
+        data: Array.from({ length: campaign.slotsTotal }, () => ({
+          campaignId,
+          role,
+          unitPriceMinor: unitPrice,
+        })),
+      }),
+      this.prisma.campaign.update({
+        where: { id: campaignId },
+        data: {
+          status: CampaignStatus.QUOTED,
+          priceMinor: totalPrice,
+          budgetMinor: totalPrice,
+          quotedAt: new Date(),
+        },
+      }),
+    ]);
 
     return {
       price: toMoney(totalPrice),
@@ -227,24 +236,7 @@ export class CampaignsService {
 
   private async estimateEligible(filters: TargetingFilters): Promise<{ count: number; reach: number }> {
     const config = await this.rateConfig.getActive();
-
-    // Promoters who are active, trusted enough, and have at least one channel
-    // meeting the platform + reach floor. Age/state/language narrow it further.
-    const channelWhere: Prisma.ChannelWhereInput = {
-      status: 'ACTIVE',
-      effectiveReach: { gte: filters.minEffectiveReach },
-      ...(filters.platforms.length > 0 ? { platform: { in: filters.platforms as never } } : {}),
-    };
-
-    const profileWhere: Prisma.PromoterProfileWhereInput = {
-      status: PromoterStatus.ACTIVE,
-      trustScore: { gte: config.minTrustScore },
-      ...(filters.states.length > 0 ? { locationState: { in: filters.states } } : {}),
-      ...(filters.ageMin !== null ? { age: { gte: filters.ageMin } } : {}),
-      ...(filters.ageMax !== null ? { age: { lte: filters.ageMax } } : {}),
-      ...(filters.languages.length > 0 ? { languagesSpoken: { hasSome: filters.languages } } : {}),
-      user: { channels: { some: channelWhere } },
-    };
+    const { channelWhere, profileWhere } = buildEligibility(filters, config.minTrustScore);
 
     const eligible = await this.prisma.promoterProfile.findMany({
       where: profileWhere,

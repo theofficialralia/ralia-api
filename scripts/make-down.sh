@@ -40,5 +40,14 @@ if [ ! -f "$STAGED" ]; then
   exit 1
 fi
 
+# Never clobber an existing down.sql. If `prisma migrate dev` fails (e.g. in a
+# non-interactive shell), no new migration directory is created, and a careless
+# `make-down.sh <name>` would otherwise land on the previous migration and
+# overwrite its down path. Refuse.
+if [ -f "$TARGET/down.sql" ]; then
+  echo "✗ $TARGET/down.sql already exists — refusing to overwrite. Is $1 really the new migration?" >&2
+  exit 1
+fi
+
 mv "$STAGED" "$TARGET/down.sql"
 echo "→ $TARGET/down.sql"
