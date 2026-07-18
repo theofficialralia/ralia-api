@@ -228,6 +228,43 @@ export class LedgerService {
     return account.id;
   }
 
+  /**
+   * Whether this idempotency key has already been posted.
+   *
+   * Callers must consult this BEFORE their own state guards. A retry of an
+   * already-applied command otherwise trips a guard on the state that the first
+   * attempt itself produced — a funded campaign is no longer awaiting funding —
+   * and the client gets a 409 for a request that in fact succeeded.
+   */
+  async alreadyPosted(idempotencyKey: string): Promise<boolean> {
+    const existing = await this.prisma.ledgerTransaction.findUnique({
+      where: { idempotencyKey },
+      select: { id: true },
+    });
+    return existing !== null;
+  }
+
+  /**
+   * The account for an owner of this kind, created on first use.
+   *
+   * A promoter's available balance and a campaign's escrow only need to exist
+   * the moment money first moves, so callers should not have to pre-create them.
+   */
+  async getOrCreateAccount(kind: AccountKind, ownerId: string): Promise<string> {
+    const existing = await this.prisma.account.findFirst({ where: { kind, ownerId } });
+    if (existing) return existing.id;
+
+    try {
+      const created = await this.prisma.account.create({ data: { kind, ownerId } });
+      return created.id;
+    } catch {
+      // A concurrent caller created it between our read and write.
+      const raced = await this.prisma.account.findFirst({ where: { kind, ownerId } });
+      if (raced) return raced.id;
+      throw new Error(`Could not create ${kind} account for ${ownerId}`);
+    }
+  }
+
   /** The singleton platform accounts (RALIA_REVENUE, BANK_CLEARING). */
   async getPlatformAccountId(kind: AccountKind): Promise<string> {
     const account = await this.prisma.account.findFirst({ where: { kind, ownerId: null } });
