@@ -82,60 +82,83 @@ export class LedgerService {
 
     const accountIds = [...new Set(input.entries.map((e) => e.accountId))].sort();
 
-    return this.prisma.$transaction(async (tx) => {
-      // Lock every account this posting touches, in a stable order so two
-      // concurrent postings over the same accounts can't deadlock. This is what
-      // makes the non-negative check below safe under concurrency: a racing
-      // posting cannot slip between our read and our write.
-      await tx.$queryRaw`SELECT id FROM accounts WHERE id = ANY(${accountIds}::uuid[]) ORDER BY id FOR UPDATE`;
+    // Fast path: an already-committed key replays without opening a transaction
+    // or touching account locks, so a flood of duplicate deliveries is cheap.
+    const preExisting = await this.prisma.ledgerTransaction.findUnique({
+      where: { idempotencyKey: input.idempotencyKey },
+      include: { entries: true },
+    });
+    if (preExisting) {
+      this.assertReplayMatches(preExisting, input);
+      return { transactionId: preExisting.id, replayed: true };
+    }
 
-      const existing = await tx.ledgerTransaction.findUnique({
-        where: { idempotencyKey: input.idempotencyKey },
-        include: { entries: true },
-      });
-      if (existing) {
-        this.assertReplayMatches(existing, input);
-        return { transactionId: existing.id, replayed: true };
-      }
-
-      const accounts = await tx.account.findMany({ where: { id: { in: accountIds } } });
-      if (accounts.length !== accountIds.length) {
-        const found = new Set(accounts.map((a) => a.id));
-        const missing = accountIds.filter((id) => !found.has(id));
-        throw new NotFoundException(`No such account(s): ${missing.join(', ')}`);
-      }
-
-      const created = await tx.ledgerTransaction.create({
-        data: {
-          kind: input.kind,
-          referenceType: input.referenceType,
-          referenceId: input.referenceId,
-          idempotencyKey: input.idempotencyKey,
-          memo: input.memo ?? null,
-          createdBy: input.createdBy ?? null,
-          entries: {
-            create: input.entries.map((e) => ({
-              accountId: e.accountId,
-              direction: e.direction,
-              amountMinor: e.amountMinor,
-            })),
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        // Claim the idempotency key FIRST. Concurrent duplicates block on this
+        // unique index — not on the account rows — and lose fast with P2002, so
+        // only the one winner ever contends for account locks.
+        const created = await tx.ledgerTransaction.create({
+          data: {
+            kind: input.kind,
+            referenceType: input.referenceType,
+            referenceId: input.referenceId,
+            idempotencyKey: input.idempotencyKey,
+            memo: input.memo ?? null,
+            createdBy: input.createdBy ?? null,
           },
-        },
-      });
+        });
 
-      // Post first, then verify. Inside the lock these are indivisible, and
-      // checking after means the constraint is evaluated against what the
-      // ledger actually holds rather than a predicted value.
-      for (const account of accounts) {
-        if (!ACCOUNT_RULES[account.kind].nonNegative) continue;
-        const balance = await this.balanceOf(account.id, account.kind, tx);
-        if (balance < 0n) {
-          throw new InsufficientFundsError(account.id, account.kind, balance);
+        // Winner only. Lock every account this posting touches, in a stable
+        // order so two postings over the same accounts can't deadlock. This is
+        // what makes the non-negative check safe: a racing posting cannot slip
+        // between our writes and the check.
+        await tx.$queryRaw`SELECT id FROM accounts WHERE id = ANY(${accountIds}::uuid[]) ORDER BY id FOR UPDATE`;
+
+        const accounts = await tx.account.findMany({ where: { id: { in: accountIds } } });
+        if (accounts.length !== accountIds.length) {
+          const found = new Set(accounts.map((a) => a.id));
+          const missing = accountIds.filter((id) => !found.has(id));
+          throw new NotFoundException(`No such account(s): ${missing.join(', ')}`);
+        }
+
+        await tx.ledgerEntry.createMany({
+          data: input.entries.map((e) => ({
+            transactionId: created.id,
+            accountId: e.accountId,
+            direction: e.direction,
+            amountMinor: e.amountMinor,
+          })),
+        });
+
+        // Post first, then verify. Inside the lock these are indivisible, and
+        // checking after means the constraint is evaluated against what the
+        // ledger actually holds rather than a predicted value.
+        for (const account of accounts) {
+          if (!ACCOUNT_RULES[account.kind].nonNegative) continue;
+          const balance = await this.balanceOf(account.id, account.kind, tx);
+          if (balance < 0n) {
+            throw new InsufficientFundsError(account.id, account.kind, balance);
+          }
+        }
+
+        return { transactionId: created.id, replayed: false };
+      });
+    } catch (e) {
+      // A concurrent request won the key race between our pre-check and our
+      // insert. Re-read the committed transaction and return it as a replay.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        const winner = await this.prisma.ledgerTransaction.findUnique({
+          where: { idempotencyKey: input.idempotencyKey },
+          include: { entries: true },
+        });
+        if (winner) {
+          this.assertReplayMatches(winner, input);
+          return { transactionId: winner.id, replayed: true };
         }
       }
-
-      return { transactionId: created.id, replayed: false };
-    });
+      throw e;
+    }
   }
 
   private validate(input: PostInput): void {
