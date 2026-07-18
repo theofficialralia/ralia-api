@@ -1,6 +1,6 @@
 import { Controller, Get, Param, Req, Res } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
-import { ApiExcludeController } from '@nestjs/swagger';
+import { ApiNotFoundResponse, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { Public } from '../../common/auth/jwt-auth.guard';
 import { TrackingService } from './tracking.service';
@@ -8,8 +8,11 @@ import { TrackingService } from './tracking.service';
 /**
  * The public tracking redirect. Standalone (§5.5): no auth, no /v1 prefix (see
  * main.ts), and it must keep serving even while the main API is under load.
+ *
+ * Documented rather than hidden: §6 lists it in the API contract, and the apps
+ * need to know the shape of the link they render.
  */
-@ApiExcludeController()
+@ApiTags('tracking')
 @Controller('r')
 export class TrackingController {
   constructor(private readonly tracking: TrackingService) {}
@@ -17,6 +20,14 @@ export class TrackingController {
   @Public()
   @SkipThrottle()
   @Get(':token')
+  @ApiOperation({
+    summary: 'Follow a promoter’s tracking link',
+    description:
+      'Records the click and redirects to the campaign destination. Public and unversioned. IP and user-agent are stored only as salted hashes.',
+  })
+  @ApiParam({ name: 'token', description: 'The assignment’s tracking token.' })
+  @ApiResponse({ status: 302, description: 'Redirect to the campaign destination.' })
+  @ApiNotFoundResponse({ description: 'Unknown token.' })
   async redirect(
     @Param('token') token: string,
     @Req() req: Request,

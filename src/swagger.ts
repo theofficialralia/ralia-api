@@ -8,12 +8,12 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
  * reconnaissance gift on a money system. Staging keeps it — that is where the
  * designer and any frontend work read the contract from.
  */
-export function setupSwagger(app: INestApplication): string | null {
-  if (process.env.NODE_ENV === 'production' && process.env.SWAGGER_ENABLED !== 'true') {
-    return null;
-  }
-
-  const config = new DocumentBuilder()
+/**
+ * The document definition, shared by the runtime mount and by
+ * scripts/export-openapi.ts so the committed spec cannot drift from the API.
+ */
+export function buildOpenApiConfig() {
+  return new DocumentBuilder()
     .setTitle('Ralia API')
     .setDescription(
       [
@@ -39,8 +39,21 @@ export function setupSwagger(app: INestApplication): string | null {
     .addTag('health', 'Liveness and dependency checks')
     .addTag('ledger', 'Accounts, balances, postings. All money access goes through here.')
     .build();
+}
 
-  const document = SwaggerModule.createDocument(app, config);
+/**
+ * Mounts Swagger UI at /docs.
+ *
+ * Disabled in production: it enumerates every endpoint and shape, which is a
+ * reconnaissance gift on a money system. Staging keeps it — that is where the
+ * designer and any frontend work read the contract from.
+ */
+export function setupSwagger(app: INestApplication): string | null {
+  if (process.env.NODE_ENV === 'production' && process.env.SWAGGER_ENABLED !== 'true') {
+    return null;
+  }
+
+  const document = SwaggerModule.createDocument(app, buildOpenApiConfig());
 
   SwaggerModule.setup('docs', app, document, {
     jsonDocumentUrl: 'docs/openapi.json',

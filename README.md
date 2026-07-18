@@ -38,7 +38,39 @@ make migrate   # create and apply a migration
 make seed      # re-run the seed
 make test      # test suite
 make psql      # psql shell into the dev database
+make openapi   # write docs/openapi.json from the code
+make verify-loop  # drive the whole loop through the live API
+make gate      # openapi + a dated end-to-end run, as gate evidence
 ```
+
+## Verifying the whole thing works
+
+`make verify-loop` drives the complete product loop through the public API
+against a running server, and asserts the money at each step:
+
+```
+register client + promoter → profile + channel → admin approves promoter
+→ create, price and fund a campaign → candidates → offer → accept
+→ click the tracking link → submit proof → admin approves
+→ ledger pays the promoter → withdraw → admin records the payout
+```
+
+It ends by checking that the payout was **one balanced transaction**, that the
+books close (cash held = everything owed plus earned), and that every decision
+left an audit row. It exits non-zero on the first failed assertion, so it is
+usable as a smoke test, not just a demo.
+
+`make gate` runs that and writes a dated transcript to `docs/gate-evidence/`,
+alongside the generated `docs/openapi.json`. Together these are the Phase-2 gate
+artifacts: the frozen contract, and dated proof the loop runs end to end.
+
+Two things to know when running it:
+
+- It registers two accounts per run and registration is rate-limited to 5/min, so
+  wait a minute between runs. The script says so plainly if it is throttled.
+- It needs `DEV_OTP_LOG` set (see `.env.example`) so it can complete a real
+  signup through the API. The console OTP provider that writes it refuses to boot
+  in production, so this seam cannot exist there.
 
 ## Migrations
 

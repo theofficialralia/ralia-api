@@ -1,0 +1,3506 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "HealthController_check",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/v1/auth/register": {
+      "post": {
+        "operationId": "AuthController_register",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisterResponseDto"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Email or phone already registered."
+          }
+        },
+        "summary": "Register a client or promoter",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/otp/request": {
+      "post": {
+        "description": "Always returns 202, whether or not the number is registered — an unauthenticated caller does not get to enumerate accounts.",
+        "operationId": "AuthController_requestOtp",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Request a verification code",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/otp/verify": {
+      "post": {
+        "operationId": "AuthController_verifyOtp",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpVerifyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Verify a phone code and receive tokens",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/login": {
+      "post": {
+        "operationId": "AuthController_login",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Email or password is incorrect."
+          },
+          "403": {
+            "description": "Account suspended, or phone not yet verified (code PHONE_NOT_VERIFIED)."
+          }
+        },
+        "summary": "Log in with email and password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/refresh": {
+      "post": {
+        "description": "Rotates: the presented token is revoked. Replaying an already-revoked token revokes every session for that user.",
+        "operationId": "AuthController_refresh",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Exchange a refresh token for a new pair",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "operationId": "AuthController_logout",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "summary": "Revoke a refresh token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/me": {
+      "get": {
+        "operationId": "AuthController_me",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "The current user",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/promoters/me/profile": {
+      "get": {
+        "operationId": "PromotersController_getProfile",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "The current promoter profile, with what is still outstanding",
+        "tags": [
+          "promoters"
+        ]
+      },
+      "put": {
+        "description": "Only the fields present are written, so the questionnaire resumes across sittings. Once everything required is present and at least one channel exists, the profile moves to AWAITING_APPROVAL by itself.",
+        "operationId": "PromotersController_updateProfile",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Save the questionnaire, partially",
+        "tags": [
+          "promoters"
+        ]
+      }
+    },
+    "/v1/promoters/me/channels": {
+      "get": {
+        "operationId": "PromotersController_listChannels",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChannelDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "List channels",
+        "tags": [
+          "promoters"
+        ]
+      },
+      "post": {
+        "description": "Returns the computed effective_reach (§5.1). Reach and verification tier are server-set.",
+        "operationId": "PromotersController_createChannel",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateChannelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Add a channel",
+        "tags": [
+          "promoters"
+        ]
+      }
+    },
+    "/v1/promoters/me/channels/{id}": {
+      "delete": {
+        "operationId": "PromotersController_removeChannel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Remove a channel",
+        "tags": [
+          "promoters"
+        ]
+      }
+    },
+    "/v1/promoters/me/bank": {
+      "get": {
+        "operationId": "PromotersController_listBank",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BankAccountDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "List bank accounts (masked)",
+        "tags": [
+          "promoters"
+        ]
+      },
+      "post": {
+        "description": "The account number is encrypted at rest and never returned in full.",
+        "operationId": "PromotersController_createBank",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBankAccountDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankAccountDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Store bank details",
+        "tags": [
+          "promoters"
+        ]
+      }
+    },
+    "/v1/campaigns": {
+      "post": {
+        "operationId": "CampaignsController_create",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCampaignDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Create a draft campaign",
+        "tags": [
+          "campaigns"
+        ]
+      },
+      "get": {
+        "operationId": "CampaignsController_list",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CampaignDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "List my campaigns",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/v1/campaigns/{id}": {
+      "get": {
+        "operationId": "CampaignsController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Get one campaign",
+        "tags": [
+          "campaigns"
+        ]
+      },
+      "patch": {
+        "description": "Editing a quoted campaign returns it to DRAFT and clears the stale price.",
+        "operationId": "CampaignsController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCampaignDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Edit a draft",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/v1/campaigns/{id}/targeting": {
+      "put": {
+        "operationId": "CampaignsController_setTargeting",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTargetingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Set targeting",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/v1/campaigns/{id}/quote": {
+      "post": {
+        "description": "Returns price, per-slot fee, estimated reach and eligible promoter count. Freezes the price and moves the campaign to QUOTED; a later rate_config change never reprices it.",
+        "operationId": "CampaignsController_quote",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Price the campaign",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/v1/campaigns/{id}/submit": {
+      "post": {
+        "operationId": "CampaignsController_submit",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Submit a quoted campaign for admin approval",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/v1/campaigns/{id}/assets": {
+      "get": {
+        "operationId": "CampaignsController_listAssets",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "List campaign assets",
+        "tags": [
+          "campaigns"
+        ]
+      },
+      "post": {
+        "description": "A CAPTION asset is text-only; other kinds require a file (≤10 MB).",
+        "operationId": "CampaignsController_uploadAsset",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "IMAGE",
+                      "VIDEO",
+                      "DOCUMENT",
+                      "POSTER",
+                      "CAPTION",
+                      "LOGO"
+                    ]
+                  },
+                  "caption_text": {
+                    "type": "string"
+                  },
+                  "order_index": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Upload one asset",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/v1/campaigns/{id}/candidates": {
+      "get": {
+        "operationId": "MatchingController_candidates",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CandidateDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Ranked eligible promoters for a campaign",
+        "tags": [
+          "matching (admin)"
+        ]
+      }
+    },
+    "/v1/campaigns/{id}/offers": {
+      "post": {
+        "operationId": "MatchingController_sendOffers",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendOffersDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OfferDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Send offers to selected promoters",
+        "tags": [
+          "matching (admin)"
+        ]
+      }
+    },
+    "/v1/offers": {
+      "get": {
+        "operationId": "OffersController_list",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OfferDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "My live offers",
+        "tags": [
+          "offers"
+        ]
+      }
+    },
+    "/v1/offers/{id}/accept": {
+      "post": {
+        "description": "Reserves a slot atomically and issues the assignment. 409 if the offer is stale or the campaign is full.",
+        "operationId": "OffersController_accept",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssignmentDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Accept an offer",
+        "tags": [
+          "offers"
+        ]
+      }
+    },
+    "/v1/offers/{id}/decline": {
+      "post": {
+        "operationId": "OffersController_decline",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Decline an offer",
+        "tags": [
+          "offers"
+        ]
+      }
+    },
+    "/r/{token}": {
+      "get": {
+        "description": "Records the click and redirects to the campaign destination. Public and unversioned. IP and user-agent are stored only as salted hashes.",
+        "operationId": "TrackingController_redirect",
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "path",
+            "description": "The assignment’s tracking token.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the campaign destination."
+          },
+          "404": {
+            "description": "Unknown token."
+          }
+        },
+        "summary": "Follow a promoter’s tracking link",
+        "tags": [
+          "tracking"
+        ]
+      }
+    },
+    "/v1/assignments/{id}/submission": {
+      "post": {
+        "description": "A screenshot is required; public_url is optional because a WhatsApp status has none. The screenshot is perceptually hashed and compared with existing proof; a match sets auto_flag for the admin. Nothing auto-approves — every submission lands PENDING in the review queue.",
+        "operationId": "EvidenceController_submit",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "public_url": {
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Submit proof for an assignment",
+        "tags": [
+          "evidence"
+        ]
+      }
+    },
+    "/v1/assignments/{id}/submissions": {
+      "get": {
+        "operationId": "EvidenceController_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SubmissionDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "My submissions for this assignment",
+        "tags": [
+          "evidence"
+        ]
+      }
+    },
+    "/v1/admin/queues/promoters": {
+      "get": {
+        "operationId": "AdminController_pendingPromoters",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Promoters awaiting approval",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/queues/campaigns": {
+      "get": {
+        "operationId": "AdminController_pendingCampaigns",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Campaigns awaiting approval or payment",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/queues/submissions": {
+      "get": {
+        "description": "auto_flag marks perceptual duplicates.",
+        "operationId": "AdminController_pendingSubmissions",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Submissions awaiting review",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/queues/withdrawals": {
+      "get": {
+        "operationId": "AdminController_pendingWithdrawals",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Withdrawals awaiting approval or payment",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/promoters/{id}/approve": {
+      "post": {
+        "description": "Also activates their channels so they become matchable.",
+        "operationId": "AdminController_approvePromoter",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Approve a promoter",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/promoters/{id}/reject": {
+      "post": {
+        "operationId": "AdminController_rejectPromoter",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Reject a promoter (reason required)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/campaigns/{id}/approve": {
+      "post": {
+        "description": "Moves it to CONFIRMING_PAYMENT; funding makes it LIVE.",
+        "operationId": "AdminController_approveCampaign",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Approve a campaign",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/campaigns/{id}/reject": {
+      "post": {
+        "operationId": "AdminController_rejectCampaign",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Reject a campaign (reason required)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/campaigns/{id}/fund": {
+      "post": {
+        "description": "DR BANK_CLEARING / CR CAMPAIGN_ESCROW, then the campaign goes LIVE. Requires an Idempotency-Key.",
+        "operationId": "AdminController_fundCampaign",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundCampaignDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Record the client’s bank transfer",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/submissions/{id}/approve": {
+      "post": {
+        "description": "Fee to the promoter and Ralia’s take leave escrow in one balanced transaction. Requires an Idempotency-Key.",
+        "operationId": "AdminController_approveSubmission",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Approve proof and pay the promoter",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/submissions/{id}/reject": {
+      "post": {
+        "description": "The assignment returns to REJECTED so the promoter can resubmit.",
+        "operationId": "AdminController_rejectSubmission",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Reject proof (reason required)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/withdrawals/{id}/approve": {
+      "post": {
+        "operationId": "AdminController_approveWithdrawal",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Approve a withdrawal request",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/withdrawals/{id}/record-paid": {
+      "post": {
+        "description": "DR PROMOTER_AVAILABLE / CR BANK_CLEARING. Requires an Idempotency-Key.",
+        "operationId": "AdminController_recordWithdrawalPaid",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordWithdrawalPaidDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Record the payout transfer you sent",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/wallet": {
+      "get": {
+        "description": "Derived from ledger postings; there is no balance column.",
+        "operationId": "WalletController_get",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WalletDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "My balance",
+        "tags": [
+          "wallet"
+        ]
+      }
+    },
+    "/v1/withdrawals": {
+      "get": {
+        "operationId": "WalletController_list",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WithdrawalDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "My withdrawals",
+        "tags": [
+          "wallet"
+        ]
+      },
+      "post": {
+        "description": "Does not move money — the admin records the transfer they send. Rejected below the configured minimum or above the unencumbered balance.",
+        "operationId": "WalletController_request",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestWithdrawalDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawalDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Request a withdrawal",
+        "tags": [
+          "wallet"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "Ralia API",
+    "description": "Two-sided promotion marketplace — businesses fund campaigns, promoters post them for a fee.\n\n**Money**: every amount is an integer in minor units (kobo). Responses carry both\n`amount_minor` (integer) and `amount_display` (formatted). Never a float.\n\n**Idempotency**: every mutating money endpoint requires an `Idempotency-Key` header\nand rejects the request without one. Replaying a key returns the original result\nwithout moving the balance again.",
+    "version": "0.1.0",
+    "contact": {}
+  },
+  "tags": [
+    {
+      "name": "health",
+      "description": "Liveness and dependency checks"
+    },
+    {
+      "name": "ledger",
+      "description": "Accounts, balances, postings. All money access goes through here."
+    }
+  ],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "access-token": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http"
+      }
+    },
+    "schemas": {
+      "HealthResponseDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded"
+            ],
+            "example": "ok"
+          },
+          "db": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "example": "up"
+          }
+        },
+        "required": [
+          "status",
+          "db"
+        ]
+      },
+      "RegisterDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "ada@example.com"
+          },
+          "phone_e164": {
+            "type": "string",
+            "example": "+2348012345678",
+            "description": "E.164, with country code."
+          },
+          "password": {
+            "type": "string",
+            "example": "correct horse battery staple",
+            "minLength": 10
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "CLIENT",
+              "PROMOTER"
+            ],
+            "example": "PROMOTER"
+          },
+          "org_name": {
+            "type": "string",
+            "example": "Naija Threads",
+            "description": "Required when role is CLIENT."
+          },
+          "accepted_terms": {
+            "type": "boolean",
+            "example": true,
+            "description": "Must be true. Recorded as a consent row."
+          },
+          "accepted_privacy": {
+            "type": "boolean",
+            "example": true,
+            "description": "Must be true. Recorded as a consent row."
+          }
+        },
+        "required": [
+          "email",
+          "phone_e164",
+          "password",
+          "role",
+          "accepted_terms",
+          "accepted_privacy"
+        ]
+      },
+      "RegisterResponseDto": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "example": "PENDING"
+          },
+          "next": {
+            "type": "string",
+            "example": "VERIFY_PHONE",
+            "description": "What the client should do next."
+          }
+        },
+        "required": [
+          "user_id",
+          "status",
+          "next"
+        ]
+      },
+      "OtpRequestDto": {
+        "type": "object",
+        "properties": {
+          "phone_e164": {
+            "type": "string",
+            "example": "+2348012345678"
+          }
+        },
+        "required": [
+          "phone_e164"
+        ]
+      },
+      "AcceptedDto": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "example": true
+          },
+          "message": {
+            "type": "string",
+            "example": "If that number is registered, a code has been sent."
+          }
+        },
+        "required": [
+          "accepted",
+          "message"
+        ]
+      },
+      "OtpVerifyDto": {
+        "type": "object",
+        "properties": {
+          "phone_e164": {
+            "type": "string",
+            "example": "+2348012345678"
+          },
+          "code": {
+            "type": "string",
+            "example": "123456",
+            "minLength": 6,
+            "maxLength": 6
+          }
+        },
+        "required": [
+          "phone_e164",
+          "code"
+        ]
+      },
+      "TokenPairDto": {
+        "type": "object",
+        "properties": {
+          "access_token": {
+            "type": "string"
+          },
+          "refresh_token": {
+            "type": "string"
+          },
+          "expires_in": {
+            "type": "number",
+            "example": 900,
+            "description": "Access token lifetime in seconds."
+          },
+          "token_type": {
+            "type": "string",
+            "example": "Bearer"
+          }
+        },
+        "required": [
+          "access_token",
+          "refresh_token",
+          "expires_in",
+          "token_type"
+        ]
+      },
+      "LoginDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "ada@example.com"
+          },
+          "password": {
+            "type": "string",
+            "example": "correct horse battery staple"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ]
+      },
+      "RefreshDto": {
+        "type": "object",
+        "properties": {
+          "refresh_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "refresh_token"
+        ]
+      },
+      "MeDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string"
+          },
+          "phone_e164": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "CLIENT",
+                "PROMOTER",
+                "ADMIN"
+              ]
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "phone_verified_at": {
+            "type": "object",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "phone_e164",
+          "roles",
+          "status",
+          "phone_verified_at"
+        ]
+      },
+      "ProfileDto": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PROFILE_INCOMPLETE",
+              "AWAITING_APPROVAL",
+              "REJECTED",
+              "ACTIVE"
+            ]
+          },
+          "full_name": {
+            "type": "object",
+            "nullable": true
+          },
+          "dob": {
+            "type": "object",
+            "nullable": true,
+            "example": "1998-04-12"
+          },
+          "age": {
+            "type": "object",
+            "nullable": true,
+            "description": "Derived from dob. Never client-set."
+          },
+          "gender": {
+            "type": "string",
+            "enum": [
+              "MALE",
+              "FEMALE",
+              "OTHER",
+              "PREFER_NOT_TO_SAY"
+            ],
+            "nullable": true
+          },
+          "location_state": {
+            "type": "object",
+            "nullable": true
+          },
+          "languages_spoken": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "preferred_categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_campaigns_per_week": {
+            "type": "number"
+          },
+          "trust_score": {
+            "type": "number",
+            "example": 50,
+            "description": "Set by admins, not by the promoter."
+          },
+          "complete": {
+            "type": "boolean",
+            "example": false,
+            "description": "True once every required field is present and at least one channel exists."
+          },
+          "missing": {
+            "example": [
+              "location_state"
+            ],
+            "description": "What is still outstanding.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "user_id",
+          "status",
+          "full_name",
+          "dob",
+          "age",
+          "gender",
+          "location_state",
+          "languages_spoken",
+          "preferred_categories",
+          "max_campaigns_per_week",
+          "trust_score",
+          "complete",
+          "missing"
+        ]
+      },
+      "UpdateProfileDto": {
+        "type": "object",
+        "properties": {
+          "full_name": {
+            "type": "string",
+            "example": "Ada Okafor"
+          },
+          "dob": {
+            "type": "string",
+            "example": "1998-04-12",
+            "description": "ISO date. Requires DATA_DOB consent, recorded on save."
+          },
+          "gender": {
+            "type": "string",
+            "enum": [
+              "MALE",
+              "FEMALE",
+              "OTHER",
+              "PREFER_NOT_TO_SAY"
+            ],
+            "description": "Requires DATA_GENDER consent, recorded on save."
+          },
+          "location_state": {
+            "type": "string",
+            "example": "Lagos"
+          },
+          "languages_spoken": {
+            "example": [
+              "English",
+              "Yoruba"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "preferred_categories": {
+            "example": [
+              "Fashion",
+              "Tech"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_campaigns_per_week": {
+            "type": "number",
+            "example": 3,
+            "minimum": 1,
+            "maximum": 20
+          }
+        }
+      },
+      "ChannelDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "WHATSAPP_STATUS",
+              "WHATSAPP_GROUP",
+              "INSTAGRAM",
+              "X",
+              "TIKTOK",
+              "FACEBOOK",
+              "TELEGRAM",
+              "LINKEDIN",
+              "OFFLINE"
+            ]
+          },
+          "handle": {
+            "type": "object",
+            "nullable": true
+          },
+          "url": {
+            "type": "object",
+            "nullable": true
+          },
+          "claimed_audience": {
+            "type": "number",
+            "example": 2400
+          },
+          "verification_tier": {
+            "type": "string",
+            "enum": [
+              "SELF",
+              "SCREENSHOT",
+              "INSIGHTS"
+            ],
+            "description": "SELF until an admin verifies evidence."
+          },
+          "effective_reach": {
+            "type": "number",
+            "example": 144,
+            "description": "claimed × platform factor × verification factor (§5.1). Computed server-side."
+          },
+          "status": {
+            "type": "string"
+          },
+          "admin_frozen": {
+            "type": "boolean",
+            "example": false
+          }
+        },
+        "required": [
+          "id",
+          "platform",
+          "handle",
+          "url",
+          "claimed_audience",
+          "verification_tier",
+          "effective_reach",
+          "status",
+          "admin_frozen"
+        ]
+      },
+      "CreateChannelDto": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "WHATSAPP_STATUS",
+              "WHATSAPP_GROUP",
+              "INSTAGRAM",
+              "X",
+              "TIKTOK",
+              "FACEBOOK",
+              "TELEGRAM",
+              "LINKEDIN",
+              "OFFLINE"
+            ]
+          },
+          "handle": {
+            "type": "string",
+            "example": "@adastyles"
+          },
+          "url": {
+            "type": "string",
+            "example": "https://instagram.com/adastyles"
+          },
+          "claimed_audience": {
+            "type": "number",
+            "example": 2400,
+            "minimum": 0
+          },
+          "is_group": {
+            "type": "boolean",
+            "example": false
+          },
+          "is_group_admin": {
+            "type": "boolean",
+            "example": false
+          },
+          "group_members": {
+            "type": "number",
+            "example": 500
+          },
+          "active_participants": {
+            "type": "number",
+            "example": 120
+          }
+        },
+        "required": [
+          "platform",
+          "claimed_audience"
+        ]
+      },
+      "BankAccountDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bank_code": {
+            "type": "string",
+            "example": "058"
+          },
+          "account_number_masked": {
+            "type": "string",
+            "example": "******6789",
+            "description": "Masked. The full number is never returned."
+          },
+          "account_name": {
+            "type": "string",
+            "example": "ADA OKAFOR"
+          },
+          "is_default": {
+            "type": "boolean",
+            "example": true
+          }
+        },
+        "required": [
+          "id",
+          "bank_code",
+          "account_number_masked",
+          "account_name",
+          "is_default"
+        ]
+      },
+      "CreateBankAccountDto": {
+        "type": "object",
+        "properties": {
+          "bank_code": {
+            "type": "string",
+            "example": "058",
+            "description": "Nigerian bank code."
+          },
+          "account_number": {
+            "type": "string",
+            "example": "0123456789",
+            "description": "NUBAN, 10 digits. Encrypted at rest; never returned."
+          },
+          "account_name": {
+            "type": "string",
+            "example": "ADA OKAFOR"
+          }
+        },
+        "required": [
+          "bank_code",
+          "account_number",
+          "account_name"
+        ]
+      },
+      "CreateCampaignDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Harmattan Drop"
+          },
+          "objective": {
+            "type": "string",
+            "enum": [
+              "AWARENESS",
+              "APP_INSTALL",
+              "WEBSITE_VISIT",
+              "PURCHASE",
+              "LEAD_GEN"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "example": "Drive awareness for our new collection."
+          },
+          "promoter_instructions": {
+            "type": "string",
+            "example": "Post the supplied image to your status for 24h."
+          },
+          "destination_url": {
+            "type": "string",
+            "example": "https://naijathreads.example/shop"
+          },
+          "slots_total": {
+            "type": "number",
+            "example": 12,
+            "minimum": 1,
+            "maximum": 500,
+            "description": "How many promoter slots."
+          }
+        },
+        "required": [
+          "name",
+          "objective",
+          "destination_url",
+          "slots_total"
+        ]
+      },
+      "MoneyDto": {
+        "type": "object",
+        "properties": {
+          "amount_minor": {
+            "type": "number",
+            "example": 210000,
+            "description": "Integer minor units (kobo)."
+          },
+          "amount_display": {
+            "type": "string",
+            "example": "₦2,100.00"
+          }
+        },
+        "required": [
+          "amount_minor",
+          "amount_display"
+        ]
+      },
+      "CampaignDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string",
+            "enum": [
+              "AWARENESS",
+              "APP_INSTALL",
+              "WEBSITE_VISIT",
+              "PURCHASE",
+              "LEAD_GEN"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "QUOTED",
+              "PENDING_APPROVAL",
+              "REJECTED",
+              "CONFIRMING_PAYMENT",
+              "LIVE",
+              "PAUSED",
+              "ENDED",
+              "FULFILLED",
+              "SETTLED",
+              "CANCELLED"
+            ]
+          },
+          "description": {
+            "type": "object",
+            "nullable": true
+          },
+          "promoter_instructions": {
+            "type": "object",
+            "nullable": true
+          },
+          "destination_url": {
+            "type": "object"
+          },
+          "slots_total": {
+            "type": "number"
+          },
+          "slots_filled": {
+            "type": "number"
+          },
+          "price": {
+            "nullable": true,
+            "description": "The price quoted, frozen at quote time.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "budget": {
+            "$ref": "#/components/schemas/MoneyDto"
+          },
+          "quoted_at": {
+            "type": "object",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "objective",
+          "status",
+          "description",
+          "promoter_instructions",
+          "destination_url",
+          "slots_total",
+          "slots_filled",
+          "price",
+          "budget",
+          "quoted_at"
+        ]
+      },
+      "UpdateCampaignDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Harmattan Drop"
+          },
+          "objective": {
+            "type": "string",
+            "enum": [
+              "AWARENESS",
+              "APP_INSTALL",
+              "WEBSITE_VISIT",
+              "PURCHASE",
+              "LEAD_GEN"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "promoter_instructions": {
+            "type": "string"
+          },
+          "destination_url": {
+            "type": "string",
+            "example": "https://naijathreads.example/shop"
+          },
+          "slots_total": {
+            "type": "number",
+            "example": 12,
+            "minimum": 1,
+            "maximum": 500
+          }
+        }
+      },
+      "SetTargetingDto": {
+        "type": "object",
+        "properties": {
+          "states": {
+            "example": [
+              "Lagos",
+              "Oyo"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "lgas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "age_min": {
+            "type": "number",
+            "example": 18,
+            "minimum": 13,
+            "maximum": 100
+          },
+          "age_max": {
+            "type": "number",
+            "example": 45,
+            "minimum": 13,
+            "maximum": 100
+          },
+          "genders": {
+            "example": [
+              "MALE",
+              "FEMALE"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "languages": {
+            "example": [
+              "English",
+              "Yoruba"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "categories": {
+            "example": [
+              "Fashion"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "WHATSAPP_STATUS",
+                "INSTAGRAM",
+                "X",
+                "TIKTOK",
+                "FACEBOOK",
+                "TELEGRAM",
+                "LINKEDIN",
+                "WHATSAPP_GROUP",
+                "OFFLINE"
+              ]
+            }
+          },
+          "min_effective_reach": {
+            "type": "number",
+            "example": 100,
+            "minimum": 0,
+            "description": "Minimum effective reach per channel."
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "DISTRIBUTOR",
+                "CREATOR",
+                "PARTICIPATOR",
+                "INFLUENCER"
+              ]
+            }
+          }
+        }
+      },
+      "QuoteDto": {
+        "type": "object",
+        "properties": {
+          "price": {
+            "description": "Total campaign price = Σ slot prices.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "unit_price": {
+            "description": "Per-slot price at current targeting.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "promoter_fee": {
+            "description": "What one promoter earns per slot (price − take).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "slots_total": {
+            "type": "number",
+            "example": 12
+          },
+          "estimated_reach": {
+            "type": "number",
+            "example": 2400,
+            "description": "Sum of effective reach across eligible promoters (estimate)."
+          },
+          "eligible_promoters": {
+            "type": "number",
+            "example": 34,
+            "description": "How many promoters currently match the targeting."
+          },
+          "active_filters": {
+            "type": "number",
+            "example": 3,
+            "description": "Active targeting filters feeding the multiplier."
+          }
+        },
+        "required": [
+          "price",
+          "unit_price",
+          "promoter_fee",
+          "slots_total",
+          "estimated_reach",
+          "eligible_promoters",
+          "active_filters"
+        ]
+      },
+      "CandidateChannelDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "effective_reach": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "platform",
+          "effective_reach"
+        ]
+      },
+      "CandidateDto": {
+        "type": "object",
+        "properties": {
+          "promoter_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "full_name": {
+            "type": "object",
+            "nullable": true
+          },
+          "location_state": {
+            "type": "object",
+            "nullable": true
+          },
+          "trust_score": {
+            "type": "number"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/CandidateChannelDto"
+          },
+          "assignments_this_week": {
+            "type": "number"
+          },
+          "max_campaigns_per_week": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "promoter_id",
+          "full_name",
+          "location_state",
+          "trust_score",
+          "channel",
+          "assignments_this_week",
+          "max_campaigns_per_week"
+        ]
+      },
+      "SendOffersDto": {
+        "type": "object",
+        "properties": {
+          "promoter_ids": {
+            "description": "Promoter ids from the candidates list.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "promoter_ids"
+        ]
+      },
+      "OfferDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaign_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaign_name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "fee_minor": {
+            "type": "number",
+            "example": 2415,
+            "description": "What the promoter earns, in kobo."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "campaign_id",
+          "campaign_name",
+          "role",
+          "fee_minor",
+          "expires_at",
+          "status"
+        ]
+      },
+      "AssignmentDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaign_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string"
+          },
+          "fee_minor": {
+            "type": "number",
+            "example": 2415
+          },
+          "tracking_token": {
+            "type": "string",
+            "description": "The token behind this assignment’s tracking link."
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "campaign_id",
+          "role",
+          "fee_minor",
+          "tracking_token",
+          "status"
+        ]
+      },
+      "SubmissionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "assignment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "REJECTED"
+            ],
+            "description": "Always PENDING on creation — nothing auto-approves."
+          },
+          "auto_flag": {
+            "type": "boolean",
+            "example": false,
+            "description": "True when the screenshot perceptually matches an existing one. A flag for the admin, not a rejection."
+          },
+          "public_url": {
+            "type": "object",
+            "nullable": true
+          },
+          "note": {
+            "type": "object",
+            "nullable": true
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "assignment_id",
+          "verdict",
+          "auto_flag",
+          "public_url",
+          "note",
+          "submitted_at"
+        ]
+      },
+      "AdminDecisionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string",
+            "example": "Recorded.",
+            "description": "What changed."
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "message"
+        ]
+      },
+      "RejectDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "example": "Screenshot does not show the campaign creative."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "FundCampaignDto": {
+        "type": "object",
+        "properties": {
+          "amount_minor": {
+            "type": "number",
+            "example": 34500,
+            "description": "Amount received, in kobo. Must equal the campaign price."
+          },
+          "reference": {
+            "type": "string",
+            "example": "GTB transfer ref 8837261",
+            "description": "Bank reference for the transfer received."
+          }
+        },
+        "required": [
+          "amount_minor"
+        ]
+      },
+      "RecordWithdrawalPaidDto": {
+        "type": "object",
+        "properties": {
+          "paid_ref": {
+            "type": "string",
+            "example": "Zenith transfer ref 552117",
+            "description": "Reference of the transfer the admin sent."
+          }
+        },
+        "required": [
+          "paid_ref"
+        ]
+      },
+      "WalletDto": {
+        "type": "object",
+        "properties": {
+          "available": {
+            "description": "Derived from ledger postings — there is no balance column.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "pending_withdrawal": {
+            "description": "Requested or approved but not yet paid.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "withdrawal_minimum": {
+            "description": "Minimum a withdrawal may be.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "can_withdraw": {
+            "type": "boolean",
+            "example": true,
+            "description": "False when the balance is below the minimum."
+          }
+        },
+        "required": [
+          "available",
+          "pending_withdrawal",
+          "withdrawal_minimum",
+          "can_withdraw"
+        ]
+      },
+      "WithdrawalDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/MoneyDto"
+          },
+          "status": {
+            "type": "string",
+            "example": "REQUESTED"
+          },
+          "paid_ref": {
+            "type": "object",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "amount",
+          "status",
+          "paid_ref",
+          "created_at"
+        ]
+      },
+      "RequestWithdrawalDto": {
+        "type": "object",
+        "properties": {
+          "amount_minor": {
+            "type": "number",
+            "example": 500000,
+            "description": "Amount to withdraw, in kobo."
+          }
+        },
+        "required": [
+          "amount_minor"
+        ]
+      }
+    }
+  }
+}

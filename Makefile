@@ -1,4 +1,4 @@
-.PHONY: up down reset seed migrate dev test logs psql stop-api help
+.PHONY: up down reset seed migrate dev test logs psql stop-api openapi verify-loop gate help
 
 # One-command bring-up from a clean checkout: infra, schema, seed data, API.
 up:
@@ -51,6 +51,18 @@ psql:
 stop-api:
 	@./scripts/stop-api.sh
 
+openapi:
+	npm run openapi
+
+# End-to-end proof the whole loop works, against a running server.
+verify-loop:
+	@./scripts/verify-loop.sh
+
+# The Phase-2 gate pack: contract + a dated end-to-end run.
+gate: openapi
+	@mkdir -p docs/gate-evidence
+	@./scripts/verify-loop.sh 2>&1 | tee "docs/gate-evidence/loop-$$(date -u +%Y%m%dT%H%M%SZ).log"
+
 help:
 	@echo "make up      — clean checkout to running seeded API (one command)"
 	@echo "make down    — stop containers, keep data"
@@ -60,3 +72,6 @@ help:
 	@echo "make test    — run the test suite"
 	@echo "make psql    — psql shell into the dev database"
 	@echo "make stop-api — stop whatever holds port 3000"
+	@echo "make openapi — write docs/openapi.json from the code"
+	@echo "make verify-loop — drive the whole loop through the API"
+	@echo "make gate    — openapi + a dated end-to-end run, as gate evidence"

@@ -2,7 +2,7 @@
   "name": "ralia-api",
   "version": "0.1.0",
   "private": true,
-  "description": "Ralia MVP — two-sided promotion marketplace API",
+  "description": "Ralia MVP \u2014 two-sided promotion marketplace API",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=20.0.0"
@@ -22,7 +22,9 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:reset": "prisma migrate reset --force",
     "prisma:studio": "prisma studio",
-    "seed": "ts-node --transpile-only prisma/seed.ts"
+    "seed": "ts-node --transpile-only prisma/seed.ts",
+    "openapi": "ts-node --transpile-only scripts/export-openapi.ts",
+    "verify:loop": "./scripts/verify-loop.sh"
   },
   "prisma": {
     "seed": "ts-node --transpile-only prisma/seed.ts"

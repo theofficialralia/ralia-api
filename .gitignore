@@ -9,11 +9,14 @@ coverage/
 
 *.log
 npm-debug.log*
+# …but gate evidence is a deliberate, dated artifact.
+!docs/gate-evidence/*.log
 .DS_Store
 .idea/
 .vscode/*
 !.vscode/extensions.json
 
 uploads/
+.dev-otp.log
 tmp/
 *.tsbuildinfo

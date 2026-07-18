@@ -1,14 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OtpPurpose } from '@prisma/client';
+import { appendFileSync } from 'node:fs';
 import { OtpProvider } from './otp-provider';
 
 /**
  * Dev-only. Prints the code to the console so you can log in without an SMS
- * bill.
+ * bill, and appends it to DEV_OTP_LOG so the end-to-end verification script can
+ * complete a real signup through the API rather than reaching into the database.
  *
  * Refuses to run in production: handoff §2 forbids logging OTPs, and this
  * provider's entire job is to log one. Better to crash at boot than to quietly
- * print live codes into a production log aggregator.
+ * write live codes to disk. Everything below therefore inherits that guarantee.
  */
 @Injectable()
 export class ConsoleOtpProvider implements OtpProvider {
@@ -18,12 +20,21 @@ export class ConsoleOtpProvider implements OtpProvider {
   constructor() {
     if (process.env.NODE_ENV === 'production') {
       throw new Error(
-        'ConsoleOtpProvider must never run in production — it writes OTP codes to the log. Set OTP_PROVIDER to a real adapter.',
+        'ConsoleOtpProvider must never run in production — it writes OTP codes to the log and to disk. Set OTP_PROVIDER to a real adapter.',
       );
     }
   }
 
   async send(to: string, code: string, purpose: OtpPurpose): Promise<void> {
     this.logger.log(`OTP for ${to} (${purpose}): ${code}`);
+
+    const path = process.env.DEV_OTP_LOG;
+    if (!path) return;
+    try {
+      appendFileSync(path, `${to} ${purpose} ${code}\n`);
+    } catch (err) {
+      // Never fail a signup because a dev convenience file is unwritable.
+      this.logger.warn(`Could not write ${path}: ${(err as Error).message}`);
+    }
   }
 }

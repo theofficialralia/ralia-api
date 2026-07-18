@@ -1,0 +1,60 @@
+Ralia — end-to-end loop verification
+http://localhost:3000  ·  2026-07-18 17:09:24 UTC
+
+ 1. Register a client and a promoter
+    ✓ client registered and phone verified
+    ✓ promoter registered and phone verified
+
+ 2. Promoter completes the questionnaire, a channel and bank details
+    ✓ effective reach computed server-side: 300000
+    ✓ profile complete, awaiting approval
+
+ 3. Admin approves the promoter
+    ✓ promoter approved and channels activated
+
+ 4. Client creates, targets and prices a campaign
+    ✓ quoted price ₦8,625.00
+    ✓ promoter fee ₦6,037.50 (70% after the 30% take)
+    ✓ 10 promoter(s) match the targeting
+    ✓ submitted for approval
+
+ 5. Admin approves the campaign and records the client's transfer
+    ✓ funding recorded, campaign is LIVE
+    DR BANK_CLEARING / CR CAMPAIGN_ESCROW — no payment gateway is in scope (§11)
+
+ 6. Admin reviews candidates and sends an offer; promoter accepts
+    ✓ 10 candidate(s) passed the §5.3 hard filter
+    ✓ offer received by the promoter
+    ✓ offer accepted, slot reserved, tracking link issued
+
+ 7. Someone clicks the promoter's tracking link
+    ✓ redirect 302 to the campaign destination
+    ✓ click recorded (IP and user-agent stored only as salted hashes)
+
+ 8. Promoter submits proof of posting
+    ✓ submission queued for review
+    ✓ screenshot is not a perceptual duplicate
+    nothing auto-approves — every submission reaches a human (§5.5)
+
+ 9. Admin approves the proof and the ledger pays the promoter
+    ✓ promoter balance is ₦6,037.50
+    ✓ fee and take left escrow in ONE transaction (3 legs)
+    ✓ that transaction balances: debits 862500 = credits 862500
+
+10. Promoter withdraws; admin records the payout
+    ✓ withdrawal requested
+    ✓ payout recorded
+    ✓ promoter balance returns to zero
+
+11. The books close and every decision is audited
+    ✓ cash held (2673750) = everything owed plus earned (2673750)
+    ✓ audited: promoter.approve
+    ✓ audited: campaign.approve
+    ✓ audited: campaign.fund
+    ✓ audited: submission.approve
+    ✓ audited: withdrawal.approve
+    ✓ audited: withdrawal.paid
+
+  LOOP VERIFIED — all assertions passed  
+  2026-07-18 17:09:28 UTC
+
