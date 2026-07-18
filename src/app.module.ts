@@ -14,6 +14,7 @@ import { RateConfigModule } from './common/rate-config/rate-config.module';
 import { StorageModule } from './common/storage/storage.module';
 import { HealthController } from './health/health.controller';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
+import { EvidenceModule } from './modules/evidence/evidence.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
 import { MatchingModule } from './modules/matching/matching.module';
@@ -67,6 +68,7 @@ import { TrackingModule } from './modules/tracking/tracking.module';
     CampaignsModule,
     MatchingModule,
     TrackingModule,
+    EvidenceModule,
     LedgerModule,
   ],
   controllers: [HealthController],
