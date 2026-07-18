@@ -34,3 +34,4 @@ fill_if_empty() {
 fill_if_empty JWT_ACCESS_SECRET
 fill_if_empty JWT_REFRESH_SECRET
 fill_if_empty FIELD_ENCRYPTION_KEY
+fill_if_empty TRACKING_HASH_SALT

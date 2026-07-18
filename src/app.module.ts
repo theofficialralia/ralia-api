@@ -18,6 +18,7 @@ import { IdentityModule } from './modules/identity/identity.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
 import { MatchingModule } from './modules/matching/matching.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
+import { TrackingModule } from './modules/tracking/tracking.module';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { ProfilesModule } from './modules/profiles/profiles.module';
     ProfilesModule,
     CampaignsModule,
     MatchingModule,
+    TrackingModule,
     LedgerModule,
   ],
   controllers: [HealthController],
