@@ -12,7 +12,12 @@ env:
   TEST_DATABASE_URL: postgresql://ralia:ralia_ci@localhost:5432/ralia_ci_test?schema=public
   JWT_ACCESS_SECRET: ci_access_secret_not_used_outside_ci
   JWT_REFRESH_SECRET: ci_refresh_secret_not_used_outside_ci
-  FIELD_ENCRYPTION_KEY: ci_field_key_not_used_outside_ci
+  # Must be exactly 32 bytes as 64 hex characters — the field-encryption service
+  # rejects anything else, and a plain-English placeholder parses as zero bytes.
+  # Obviously fake, and only ever used against a throwaway CI database.
+  FIELD_ENCRYPTION_KEY: c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1
+  TRACKING_HASH_SALT: c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1
+  POLICY_VERSION: '2026-07-01'
 
 jobs:
   verify:
