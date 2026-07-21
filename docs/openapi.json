@@ -1083,6 +1083,92 @@
         ]
       }
     },
+    "/v1/dashboard/summary": {
+      "get": {
+        "description": "Top-line spend, views and promoter counts, plus a per-campaign rollup for the table.",
+        "operationId": "AnalyticsController_summary",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardSummaryDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Client dashboard summary",
+        "tags": [
+          "analytics"
+        ]
+      }
+    },
+    "/v1/campaigns/{id}/analytics": {
+      "get": {
+        "description": "Views delivered, offer acceptance, completion, amount spent, and every verified/pending submission with its screenshot — the four SOW metrics plus the evidence gallery (handoff §6).",
+        "operationId": "AnalyticsController_campaign",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignAnalyticsDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Campaign analytics and evidence gallery",
+        "tags": [
+          "analytics"
+        ]
+      }
+    },
     "/v1/campaigns/{id}/candidates": {
       "get": {
         "operationId": "MatchingController_candidates",
@@ -3153,6 +3239,266 @@
           "estimated_reach",
           "eligible_promoters",
           "active_filters"
+        ]
+      },
+      "DashboardCampaignRowDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "slots_total": {
+            "type": "number"
+          },
+          "spent": {
+            "$ref": "#/components/schemas/MoneyDto"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/MoneyDto"
+          },
+          "views": {
+            "type": "number"
+          },
+          "completed": {
+            "type": "number",
+            "description": "Assignments verified and paid."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "objective",
+          "status",
+          "slots_total",
+          "spent",
+          "budget",
+          "views",
+          "completed"
+        ]
+      },
+      "DashboardSummaryDto": {
+        "type": "object",
+        "properties": {
+          "spent_this_month": {
+            "description": "Paid out across this client’s campaigns this calendar month.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "spent_change_pct": {
+            "type": "object",
+            "nullable": true,
+            "example": 18,
+            "description": "Percent change vs last month; null if last month was zero."
+          },
+          "views_delivered": {
+            "type": "number",
+            "example": 81770
+          },
+          "campaigns_total": {
+            "type": "number",
+            "example": 4
+          },
+          "live_campaigns": {
+            "type": "number",
+            "example": 1
+          },
+          "promoters_worked_with": {
+            "type": "number",
+            "example": 156,
+            "description": "Distinct promoters ever assigned to this client’s campaigns."
+          },
+          "new_evidence_today": {
+            "type": "number",
+            "example": 12,
+            "description": "Submissions received today across all campaigns."
+          },
+          "campaigns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardCampaignRowDto"
+            }
+          }
+        },
+        "required": [
+          "spent_this_month",
+          "spent_change_pct",
+          "views_delivered",
+          "campaigns_total",
+          "live_campaigns",
+          "promoters_worked_with",
+          "new_evidence_today",
+          "campaigns"
+        ]
+      },
+      "EvidenceItemDto": {
+        "type": "object",
+        "properties": {
+          "submission_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "promoter_name": {
+            "type": "object",
+            "nullable": true
+          },
+          "promoter_handle": {
+            "type": "object",
+            "nullable": true,
+            "example": "@adaeze"
+          },
+          "platform": {
+            "type": "string",
+            "example": "INSTAGRAM"
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "views": {
+            "type": "number",
+            "example": 3210,
+            "description": "Non-bot clicks on this promoter’s link."
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "REJECTED"
+            ]
+          },
+          "auto_flag": {
+            "type": "boolean",
+            "example": false,
+            "description": "The screenshot perceptually matched an earlier one."
+          },
+          "public_url": {
+            "type": "object",
+            "nullable": true
+          },
+          "image_url": {
+            "type": "object",
+            "nullable": true,
+            "description": "Short-lived signed URL for the screenshot."
+          }
+        },
+        "required": [
+          "submission_id",
+          "promoter_name",
+          "promoter_handle",
+          "platform",
+          "submitted_at",
+          "views",
+          "verdict",
+          "auto_flag",
+          "public_url",
+          "image_url"
+        ]
+      },
+      "CampaignAnalyticsDto": {
+        "type": "object",
+        "properties": {
+          "campaign_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "launched_at": {
+            "type": "object",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "spent": {
+            "description": "Paid out of escrow to promoters and Ralia so far.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "budget": {
+            "$ref": "#/components/schemas/MoneyDto"
+          },
+          "views_delivered": {
+            "type": "number",
+            "example": 41230
+          },
+          "cost_per_view": {
+            "description": "spent ÷ views, or ₦0 when there are no views yet.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "offers_sent": {
+            "type": "number",
+            "example": 76,
+            "description": "Offers sent to promoters."
+          },
+          "offers_accepted": {
+            "type": "number",
+            "example": 54,
+            "description": "Offers accepted."
+          },
+          "acceptance_rate": {
+            "type": "number",
+            "example": 0.71,
+            "description": "accepted ÷ sent, 0–1. 0 when none sent."
+          },
+          "completed": {
+            "type": "number",
+            "example": 41,
+            "description": "Assignments verified and paid."
+          },
+          "slots_total": {
+            "type": "number",
+            "example": 60
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EvidenceItemDto"
+            }
+          }
+        },
+        "required": [
+          "campaign_id",
+          "name",
+          "objective",
+          "status",
+          "launched_at",
+          "spent",
+          "budget",
+          "views_delivered",
+          "cost_per_view",
+          "offers_sent",
+          "offers_accepted",
+          "acceptance_rate",
+          "completed",
+          "slots_total",
+          "evidence"
         ]
       },
       "CandidateChannelDto": {
