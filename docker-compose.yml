@@ -1,4 +1,7 @@
 # Dev-only stack. Every port binds to 127.0.0.1 — nothing here is exposed to the network.
+# Project name is pinned so it does not track the directory name — renaming the
+# folder then wouldn't orphan the volumes under a new prefix.
+name: ralia
 services:
   postgres:
     image: postgres:16-alpine
