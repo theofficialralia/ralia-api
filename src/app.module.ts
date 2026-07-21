@@ -16,6 +16,7 @@ import { HealthController } from './health/health.controller';
 import { AdminModule } from './modules/admin/admin.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
+import { ClientsModule } from './modules/clients/clients.module';
 import { EvidenceModule } from './modules/evidence/evidence.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
@@ -70,6 +71,7 @@ import { WalletModule } from './modules/wallet/wallet.module';
     IdentityModule,
     ProfilesModule,
     CampaignsModule,
+    ClientsModule,
     AnalyticsModule,
     PaymentsModule,
     MatchingModule,

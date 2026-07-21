@@ -177,6 +177,23 @@ export class AuthService {
     return this.sessions.issue(user.id, user.roles.map((r) => r.role), userAgent);
   }
 
+  /**
+   * Change the password of a signed-in user. Requires the current password, and
+   * revokes every other session so a leaked old password can't keep a session
+   * alive after the owner rotates it.
+   */
+  async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException();
+
+    const ok = await argon2.verify(user.passwordHash, currentPassword).catch(() => false);
+    if (!ok) throw new BadRequestException('Your current password is incorrect.');
+
+    const passwordHash = await argon2.hash(newPassword);
+    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+    await this.sessions.revokeAllForUser(userId);
+  }
+
   async me(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },

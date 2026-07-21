@@ -333,6 +333,48 @@
         ]
       }
     },
+    "/v1/auth/change-password": {
+      "post": {
+        "description": "Requires the current password. Revokes all other sessions on success.",
+        "operationId": "AuthController_changePassword",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Change password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/v1/promoters/me/profile": {
       "get": {
         "operationId": "PromotersController_getProfile",
@@ -1080,6 +1122,91 @@
         "summary": "Upload one asset",
         "tags": [
           "campaigns"
+        ]
+      }
+    },
+    "/v1/clients/me": {
+      "get": {
+        "operationId": "ClientsController_me",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientProfileDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "The current business profile",
+        "tags": [
+          "client profile"
+        ]
+      },
+      "patch": {
+        "description": "Partial — only the fields sent are changed.",
+        "operationId": "ClientsController_update",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateClientProfileDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientProfileDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Update business details",
+        "tags": [
+          "client profile"
         ]
       }
     },
@@ -2635,6 +2762,22 @@
           "phone_verified_at"
         ]
       },
+      "ChangePasswordDto": {
+        "type": "object",
+        "properties": {
+          "current_password": {
+            "type": "string"
+          },
+          "new_password": {
+            "type": "string",
+            "minLength": 10
+          }
+        },
+        "required": [
+          "current_password",
+          "new_password"
+        ]
+      },
       "ProfileDto": {
         "type": "object",
         "properties": {
@@ -3297,6 +3440,113 @@
           "eligible_promoters",
           "active_filters"
         ]
+      },
+      "ClientProfileDto": {
+        "type": "object",
+        "properties": {
+          "org_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "description": "The account login email. Read-only here — changing it needs re-verification."
+          },
+          "industry": {
+            "type": "object",
+            "nullable": true
+          },
+          "phone_whatsapp": {
+            "type": "object",
+            "nullable": true
+          },
+          "website": {
+            "type": "object",
+            "nullable": true
+          },
+          "address": {
+            "type": "object",
+            "nullable": true
+          },
+          "cac_number": {
+            "type": "object",
+            "nullable": true
+          },
+          "support_contact_name": {
+            "type": "object",
+            "nullable": true
+          },
+          "support_contact_phone": {
+            "type": "object",
+            "nullable": true
+          },
+          "description": {
+            "type": "object",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "example": "ACTIVE"
+          }
+        },
+        "required": [
+          "org_id",
+          "name",
+          "email",
+          "industry",
+          "phone_whatsapp",
+          "website",
+          "address",
+          "cac_number",
+          "support_contact_name",
+          "support_contact_phone",
+          "description",
+          "status"
+        ]
+      },
+      "UpdateClientProfileDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Skinsmith Ltd"
+          },
+          "industry": {
+            "type": "string",
+            "example": "Food & Drink"
+          },
+          "phone_whatsapp": {
+            "type": "string",
+            "example": "+2348035550192"
+          },
+          "website": {
+            "type": "string",
+            "example": "instagram.com/skinsmith"
+          },
+          "address": {
+            "type": "string",
+            "example": "Street, city, state"
+          },
+          "cac_number": {
+            "type": "string",
+            "example": "RC 1234567"
+          },
+          "support_contact_name": {
+            "type": "string",
+            "example": "David Blake"
+          },
+          "support_contact_phone": {
+            "type": "string",
+            "example": "+2348035550192"
+          },
+          "description": {
+            "type": "string",
+            "example": "A couple of sentences about what you do."
+          }
+        }
       },
       "DashboardCampaignRowDto": {
         "type": "object",

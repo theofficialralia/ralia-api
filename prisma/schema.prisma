@@ -173,10 +173,22 @@ model ClientOrg {
   industry      String?
   phoneWhatsapp String?         @map("phone_whatsapp")
   status        ClientOrgStatus @default(PENDING)
+
+  // Optional profile fields — "helps the team and speeds up campaign approval"
+  // (Business details screen). All nullable; none is required to run a campaign.
+  website              String? // website or Instagram URL
+  logoFileId           String? @map("logo_file_id") @db.Uuid
+  address              String?
+  cacNumber            String? @map("cac_number") // CAC / registration number
+  supportContactName   String? @map("support_contact_name")
+  supportContactPhone  String? @map("support_contact_phone")
+  description          String?
+
   createdAt     DateTime        @default(now()) @map("created_at")
   updatedAt     DateTime        @updatedAt @map("updated_at")
 
   owner     User       @relation(fields: [ownerUserId], references: [id])
+  logo      File?      @relation("OrgLogo", fields: [logoFileId], references: [id])
   campaigns Campaign[]
 
   @@index([ownerUserId])
@@ -344,6 +356,7 @@ model File {
   campaignAssets CampaignAsset[]
   channels       Channel[]
   proofArtifacts ProofArtifact[]
+  orgLogos       ClientOrg[]     @relation("OrgLogo")
 
   @@map("files")
 }

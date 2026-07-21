@@ -16,6 +16,7 @@ import { AuthedUser, Public } from '../../common/auth/jwt-auth.guard';
 import { AuthService } from './auth.service';
 import {
   AcceptedDto,
+  ChangePasswordDto,
   LoginDto,
   MeDto,
   OtpRequestDto,
@@ -112,5 +113,17 @@ export class AuthController {
   @ApiOkResponse({ type: MeDto })
   me(@CurrentUser() user: AuthedUser): Promise<MeDto> {
     return this.auth.me(user.id) as Promise<MeDto>;
+  }
+
+  @Post('change-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiBearerAuth('access-token')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Change password',
+    description: 'Requires the current password. Revokes all other sessions on success.',
+  })
+  async changePassword(@CurrentUser() user: AuthedUser, @Body() dto: ChangePasswordDto): Promise<void> {
+    await this.auth.changePassword(user.id, dto.current_password, dto.new_password);
   }
 }

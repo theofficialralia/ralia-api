@@ -92,6 +92,19 @@ export class RefreshDto {
   refresh_token!: string;
 }
 
+export class ChangePasswordDto {
+  @ApiProperty()
+  @IsString()
+  @MaxLength(200)
+  current_password!: string;
+
+  @ApiProperty({ minLength: 10 })
+  @IsString()
+  @MinLength(10)
+  @MaxLength(200)
+  new_password!: string;
+}
+
 // ── Responses ────────────────────────────────────────────────
 
 export class RegisterResponseDto {

@@ -327,4 +327,40 @@ describe('identity — auth', () => {
   it('logout with an unknown token is a no-op, not an error', async () => {
     await http().post('/auth/logout').send({ refresh_token: 'never-issued' }).expect(204);
   });
+
+  // ── Change password ──────────────────────────────────────
+
+  it('changes the password with the correct current one, and lets the user log in with the new one', async () => {
+    const tokens = await registerAndVerify(promoter);
+    await http()
+      .post('/auth/change-password')
+      .set('Authorization', `Bearer ${tokens.access_token}`)
+      .send({ current_password: promoter.password, new_password: 'a brand new passphrase' })
+      .expect(204);
+
+    await http().post('/auth/login').send({ email: promoter.email, password: promoter.password }).expect(401);
+    await http().post('/auth/login').send({ email: promoter.email, password: 'a brand new passphrase' }).expect(200);
+  });
+
+  it('rejects a wrong current password and a too-short new one', async () => {
+    const tokens = await registerAndVerify(promoter);
+    const auth = { Authorization: `Bearer ${tokens.access_token}` };
+    await http().post('/auth/change-password').set(auth).send({ current_password: 'wrong', new_password: 'a long enough one' }).expect(400);
+    await http().post('/auth/change-password').set(auth).send({ current_password: promoter.password, new_password: 'short' }).expect(400);
+  });
+
+  it('revokes other sessions when the password changes', async () => {
+    const tokens = await registerAndVerify(promoter);
+    await http()
+      .post('/auth/change-password')
+      .set('Authorization', `Bearer ${tokens.access_token}`)
+      .send({ current_password: promoter.password, new_password: 'a brand new passphrase' })
+      .expect(204);
+    // The refresh token issued before the change is now revoked.
+    await http().post('/auth/refresh').send({ refresh_token: tokens.refresh_token }).expect(401);
+  });
+
+  it('change-password requires authentication', async () => {
+    await http().post('/auth/change-password').send({ current_password: 'x', new_password: 'a long enough one' }).expect(401);
+  });
 });
