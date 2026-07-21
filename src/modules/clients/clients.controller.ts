@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Patch } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
@@ -26,5 +26,16 @@ export class ClientsController {
   @ApiOkResponse({ type: ClientProfileDto })
   update(@CurrentUser() user: AuthedUser, @Body() dto: UpdateClientProfileDto): Promise<ClientProfileDto> {
     return this.clients.update(user.id, dto);
+  }
+
+  @Delete()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Delete (anonymise) the account',
+    description:
+      'Erasure per §7: the user is anonymised and signed out, ledger postings are preserved. Blocked while campaigns are still active with money in flight.',
+  })
+  deleteAccount(@CurrentUser() user: AuthedUser): Promise<void> {
+    return this.clients.deleteAccount(user.id);
   }
 }

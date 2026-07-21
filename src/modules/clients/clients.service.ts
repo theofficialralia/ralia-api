@@ -1,11 +1,31 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
-import { ClientOrg, Prisma } from '@prisma/client';
+import { ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
+import { CampaignStatus, ClientOrg, ClientOrgStatus, Prisma } from '@prisma/client';
+import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { AuditService } from '../admin/audit.service';
 import { ClientProfileDto, UpdateClientProfileDto } from './dto/client-profile.dto';
+
+/** Campaign states where money or promoter work is still in flight. */
+const ACTIVE_STATES: CampaignStatus[] = [
+  CampaignStatus.CONFIRMING_PAYMENT,
+  CampaignStatus.LIVE,
+  CampaignStatus.PAUSED,
+];
+
+/** Draft-ish states that are simply cancelled when the account closes. */
+const CANCELLABLE_STATES: CampaignStatus[] = [
+  CampaignStatus.DRAFT,
+  CampaignStatus.QUOTED,
+  CampaignStatus.PENDING_APPROVAL,
+  CampaignStatus.REJECTED,
+];
 
 @Injectable()
 export class ClientsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   private async orgFor(userId: string): Promise<ClientOrg> {
     const org = await this.prisma.clientOrg.findFirst({ where: { ownerUserId: userId } });
@@ -36,6 +56,71 @@ export class ClientsService {
     const updated = await this.prisma.clientOrg.update({ where: { id: org.id }, data });
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } });
     return toDto(updated, user.email);
+  }
+
+  /**
+   * Close the account. This is a §7 erasure: the user is anonymised and their
+   * sessions revoked, but ledger postings are preserved — money history is never
+   * deleted. Draft campaigns are cancelled; anything with money or promoter work
+   * still in flight blocks the deletion until it is resolved.
+   */
+  async deleteAccount(userId: string): Promise<void> {
+    const org = await this.orgFor(userId);
+
+    const active = await this.prisma.campaign.count({
+      where: { clientOrgId: org.id, status: { in: ACTIVE_STATES } },
+    });
+    if (active > 0) {
+      throw new ConflictException(
+        'You have active campaigns. Let them end or settle — with any balance withdrawn — before deleting your account.',
+      );
+    }
+
+    // A unique, non-identifying token to free the email/phone for reuse.
+    const tombstone = `deleted-${userId}-${randomBytes(4).toString('hex')}`;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.campaign.updateMany({
+        where: { clientOrgId: org.id, status: { in: CANCELLABLE_STATES } },
+        data: { status: CampaignStatus.CANCELLED },
+      });
+
+      // Anonymise the org (keep the row so its campaigns/ledger references stay intact).
+      await tx.clientOrg.update({
+        where: { id: org.id },
+        data: {
+          name: 'Deleted business',
+          status: ClientOrgStatus.SUSPENDED,
+          phoneWhatsapp: null, website: null, address: null, cacNumber: null,
+          supportContactName: null, supportContactPhone: null, description: null, logoFileId: null,
+        },
+      });
+
+      // Anonymise the user and mark it deleted — the auth guard rejects any token
+      // for a user with deletedAt set, so this closes every door immediately.
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          email: `${tombstone}@deleted.local`,
+          phoneE164: tombstone,
+          passwordHash: 'account-deleted',
+          deletedAt: new Date(),
+        },
+      });
+
+      await tx.session.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+
+      await this.audit.record(
+        {
+          actorId: userId,
+          action: 'client.account.delete',
+          entityType: 'user',
+          entityId: userId,
+          after: { anonymised: true, orgId: org.id },
+        },
+        tx,
+      );
+    });
   }
 }
 

@@ -3,7 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule, JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
-import { PrismaClient, Role } from '@prisma/client';
+import { CampaignObjective, CampaignStatus, PrismaClient, Role } from '@prisma/client';
 import request from 'supertest';
 import { JwtAuthGuard } from '../../common/auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/auth/roles.guard';
@@ -43,8 +43,20 @@ describe('clients — business profile', () => {
   });
 
   beforeEach(async () => {
-    await prisma.$executeRawUnsafe('TRUNCATE users, user_roles, client_orgs RESTART IDENTITY CASCADE');
+    await prisma.$executeRawUnsafe(
+      'TRUNCATE users, user_roles, client_orgs, campaigns, sessions, accounts, ledger_transactions, ledger_entries, audit_log RESTART IDENTITY CASCADE',
+    );
   });
+
+  async function orgId(userId: string): Promise<string> {
+    return (await prisma.clientOrg.findFirstOrThrow({ where: { ownerUserId: userId } })).id;
+  }
+  async function campaign(userId: string, status: CampaignStatus): Promise<string> {
+    const c = await prisma.campaign.create({
+      data: { clientOrgId: await orgId(userId), name: 'C', objective: CampaignObjective.AWARENESS, destinationUrl: 'https://x.example', status, budgetMinor: 0n, slotsTotal: 1 },
+    });
+    return c.id;
+  }
 
   const http = () => request(app.getHttpServer());
   const bearer = (id: string, roles: Role[]) => ({ Authorization: `Bearer ${jwt.sign({ sub: id, roles }, { secret: process.env.JWT_ACCESS_SECRET })}` });
@@ -91,5 +103,41 @@ describe('clients — business profile', () => {
     // A genuine promoter (the guard reads the DB role, not the token claim).
     const promoter = await prisma.user.create({ data: { email: `pr${seq++}@x.com`, phoneE164: `+23488${String(seq).padStart(9, '0')}`, passwordHash: 'x', status: 'ACTIVE', roles: { create: { role: Role.PROMOTER } } } });
     await http().get('/clients/me').set(bearer(promoter.id, [Role.PROMOTER])).expect(403);
+  });
+
+  // ── Delete account (erasure) ─────────────────────────────
+
+  it('anonymises the account, cancels drafts, and locks out the token', async () => {
+    const id = await makeClient();
+    const draft = await campaign(id, CampaignStatus.DRAFT);
+    await prisma.session.create({ data: { userId: id, refreshTokenHash: `h${id}`, expiresAt: new Date(Date.now() + 1e7) } });
+
+    await http().delete('/clients/me').set(bearer(id, [Role.CLIENT])).expect(204);
+
+    const user = await prisma.user.findUniqueOrThrow({ where: { id } });
+    expect(user.deletedAt).not.toBeNull();
+    expect(user.email).toMatch(/@deleted\.local$/);
+    expect(user.email).not.toMatch(/@x\.com$/);
+
+    const org = await prisma.clientOrg.findFirstOrThrow({ where: { id: await orgId(id) } });
+    expect(org.name).toBe('Deleted business');
+
+    // The draft is cancelled; the row survives (ledger references stay intact).
+    expect((await prisma.campaign.findUniqueOrThrow({ where: { id: draft } })).status).toBe(CampaignStatus.CANCELLED);
+    // Sessions revoked.
+    expect(await prisma.session.count({ where: { userId: id, revokedAt: null } })).toBe(0);
+    // Audit row written.
+    expect(await prisma.auditLog.count({ where: { action: 'client.account.delete' } })).toBe(1);
+
+    // The same token no longer authenticates (the guard rejects deletedAt).
+    await http().get('/clients/me').set(bearer(id, [Role.CLIENT])).expect(401);
+  });
+
+  it('refuses to delete while a campaign is still live', async () => {
+    const id = await makeClient();
+    await campaign(id, CampaignStatus.LIVE);
+    await http().delete('/clients/me').set(bearer(id, [Role.CLIENT])).expect(409);
+    // Nothing was anonymised.
+    expect((await prisma.user.findUniqueOrThrow({ where: { id } })).deletedAt).toBeNull();
   });
 });

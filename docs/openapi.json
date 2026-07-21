@@ -1208,12 +1208,10 @@
         "tags": [
           "client profile"
         ]
-      }
-    },
-    "/v1/dashboard/summary": {
-      "get": {
-        "description": "Top-line spend, views and promoter counts, plus a per-campaign rollup for the table.",
-        "operationId": "AnalyticsController_summary",
+      },
+      "delete": {
+        "description": "Erasure per §7: the user is anonymised and signed out, ledger postings are preserved. Blocked while campaigns are still active with money in flight.",
+        "operationId": "ClientsController_deleteAccount",
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -1227,15 +1225,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DashboardSummaryDto"
-                }
-              }
-            }
+          "204": {
+            "description": ""
           }
         },
         "security": [
@@ -1243,113 +1234,9 @@
             "access-token": []
           }
         ],
-        "summary": "Client dashboard summary",
+        "summary": "Delete (anonymise) the account",
         "tags": [
-          "analytics"
-        ]
-      }
-    },
-    "/v1/campaigns/{id}/analytics": {
-      "get": {
-        "description": "Views delivered, offer acceptance, completion, amount spent, and every verified/pending submission with its screenshot — the four SOW metrics plus the evidence gallery (handoff §6).",
-        "operationId": "AnalyticsController_campaign",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CampaignAnalyticsDto"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "access-token": []
-          }
-        ],
-        "summary": "Campaign analytics and evidence gallery",
-        "tags": [
-          "analytics"
-        ]
-      }
-    },
-    "/v1/campaigns/{id}/payments/paystack/verify": {
-      "post": {
-        "description": "The reference is verified server-side with Paystack before any money moves. On success the campaign escrow is credited and the campaign goes LIVE. Idempotent on the Paystack reference.",
-        "operationId": "PaymentsController_verify",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VerifyPaystackDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentResultDto"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "access-token": []
-          }
-        ],
-        "summary": "Confirm a Paystack payment and fund the campaign",
-        "tags": [
-          "payments"
+          "client profile"
         ]
       }
     },
@@ -1969,6 +1856,149 @@
         "summary": "Record the payout transfer you sent",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/v1/dashboard/summary": {
+      "get": {
+        "description": "Top-line spend, views and promoter counts, plus a per-campaign rollup for the table.",
+        "operationId": "AnalyticsController_summary",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardSummaryDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Client dashboard summary",
+        "tags": [
+          "analytics"
+        ]
+      }
+    },
+    "/v1/campaigns/{id}/analytics": {
+      "get": {
+        "description": "Views delivered, offer acceptance, completion, amount spent, and every verified/pending submission with its screenshot — the four SOW metrics plus the evidence gallery (handoff §6).",
+        "operationId": "AnalyticsController_campaign",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignAnalyticsDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Campaign analytics and evidence gallery",
+        "tags": [
+          "analytics"
+        ]
+      }
+    },
+    "/v1/campaigns/{id}/payments/paystack/verify": {
+      "post": {
+        "description": "The reference is verified server-side with Paystack before any money moves. On success the campaign escrow is credited and the campaign goes LIVE. Idempotent on the Paystack reference.",
+        "operationId": "PaymentsController_verify",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyPaystackDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResultDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Confirm a Paystack payment and fund the campaign",
+        "tags": [
+          "payments"
         ]
       }
     },
@@ -3548,6 +3578,71 @@
           }
         }
       },
+      "AdminDecisionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string",
+            "example": "Recorded.",
+            "description": "What changed."
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "message"
+        ]
+      },
+      "RejectDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "example": "Screenshot does not show the campaign creative."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "FundCampaignDto": {
+        "type": "object",
+        "properties": {
+          "amount_minor": {
+            "type": "number",
+            "example": 34500,
+            "description": "Amount received, in kobo. Must equal the campaign price."
+          },
+          "reference": {
+            "type": "string",
+            "example": "GTB transfer ref 8837261",
+            "description": "Bank reference for the transfer received."
+          }
+        },
+        "required": [
+          "amount_minor"
+        ]
+      },
+      "RecordWithdrawalPaidDto": {
+        "type": "object",
+        "properties": {
+          "paid_ref": {
+            "type": "string",
+            "example": "Zenith transfer ref 552117",
+            "description": "Reference of the transfer the admin sent."
+          }
+        },
+        "required": [
+          "paid_ref"
+        ]
+      },
       "DashboardCampaignRowDto": {
         "type": "object",
         "properties": {
@@ -3836,71 +3931,6 @@
         "required": [
           "status",
           "message"
-        ]
-      },
-      "AdminDecisionDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string",
-            "example": "Recorded.",
-            "description": "What changed."
-          }
-        },
-        "required": [
-          "id",
-          "status",
-          "message"
-        ]
-      },
-      "RejectDto": {
-        "type": "object",
-        "properties": {
-          "reason": {
-            "type": "string",
-            "example": "Screenshot does not show the campaign creative."
-          }
-        },
-        "required": [
-          "reason"
-        ]
-      },
-      "FundCampaignDto": {
-        "type": "object",
-        "properties": {
-          "amount_minor": {
-            "type": "number",
-            "example": 34500,
-            "description": "Amount received, in kobo. Must equal the campaign price."
-          },
-          "reference": {
-            "type": "string",
-            "example": "GTB transfer ref 8837261",
-            "description": "Bank reference for the transfer received."
-          }
-        },
-        "required": [
-          "amount_minor"
-        ]
-      },
-      "RecordWithdrawalPaidDto": {
-        "type": "object",
-        "properties": {
-          "paid_ref": {
-            "type": "string",
-            "example": "Zenith transfer ref 552117",
-            "description": "Reference of the transfer the admin sent."
-          }
-        },
-        "required": [
-          "paid_ref"
         ]
       },
       "CandidateChannelDto": {
