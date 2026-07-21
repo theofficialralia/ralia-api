@@ -20,6 +20,7 @@ import { EvidenceModule } from './modules/evidence/evidence.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
 import { MatchingModule } from './modules/matching/matching.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
 import { TrackingModule } from './modules/tracking/tracking.module';
 import { WalletModule } from './modules/wallet/wallet.module';
@@ -70,6 +71,7 @@ import { WalletModule } from './modules/wallet/wallet.module';
     ProfilesModule,
     CampaignsModule,
     AnalyticsModule,
+    PaymentsModule,
     MatchingModule,
     TrackingModule,
     EvidenceModule,

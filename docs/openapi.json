@@ -1169,58 +1169,10 @@
         ]
       }
     },
-    "/v1/campaigns/{id}/candidates": {
-      "get": {
-        "operationId": "MatchingController_candidates",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/CandidateDto"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "access-token": []
-          }
-        ],
-        "summary": "Ranked eligible promoters for a campaign",
-        "tags": [
-          "matching (admin)"
-        ]
-      }
-    },
-    "/v1/campaigns/{id}/offers": {
+    "/v1/campaigns/{id}/payments/paystack/verify": {
       "post": {
-        "operationId": "MatchingController_sendOffers",
+        "description": "The reference is verified server-side with Paystack before any money moves. On success the campaign escrow is credited and the campaign goes LIVE. Idempotent on the Paystack reference.",
+        "operationId": "PaymentsController_verify",
         "parameters": [
           {
             "name": "id",
@@ -1246,62 +1198,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SendOffersDto"
+                "$ref": "#/components/schemas/VerifyPaystackDto"
               }
             }
           }
         },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/OfferDto"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "access-token": []
-          }
-        ],
-        "summary": "Send offers to selected promoters",
-        "tags": [
-          "matching (admin)"
-        ]
-      }
-    },
-    "/v1/offers": {
-      "get": {
-        "operationId": "OffersController_list",
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/OfferDto"
-                  }
+                  "$ref": "#/components/schemas/PaymentResultDto"
                 }
               }
             }
@@ -1312,255 +1220,9 @@
             "access-token": []
           }
         ],
-        "summary": "My live offers",
+        "summary": "Confirm a Paystack payment and fund the campaign",
         "tags": [
-          "offers"
-        ]
-      }
-    },
-    "/v1/offers/{id}/accept": {
-      "post": {
-        "description": "Reserves a slot atomically and issues the assignment. 409 if the offer is stale or the campaign is full.",
-        "operationId": "OffersController_accept",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AssignmentDto"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "access-token": []
-          }
-        ],
-        "summary": "Accept an offer",
-        "tags": [
-          "offers"
-        ]
-      }
-    },
-    "/v1/offers/{id}/decline": {
-      "post": {
-        "operationId": "OffersController_decline",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "access-token": []
-          }
-        ],
-        "summary": "Decline an offer",
-        "tags": [
-          "offers"
-        ]
-      }
-    },
-    "/r/{token}": {
-      "get": {
-        "description": "Records the click and redirects to the campaign destination. Public and unversioned. IP and user-agent are stored only as salted hashes.",
-        "operationId": "TrackingController_redirect",
-        "parameters": [
-          {
-            "name": "token",
-            "required": true,
-            "in": "path",
-            "description": "The assignment’s tracking token.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "302": {
-            "description": "Redirect to the campaign destination."
-          },
-          "404": {
-            "description": "Unknown token."
-          }
-        },
-        "summary": "Follow a promoter’s tracking link",
-        "tags": [
-          "tracking"
-        ]
-      }
-    },
-    "/v1/assignments/{id}/submission": {
-      "post": {
-        "description": "A screenshot is required; public_url is optional because a WhatsApp status has none. The screenshot is perceptually hashed and compared with existing proof; a match sets auto_flag for the admin. Nothing auto-approves — every submission lands PENDING in the review queue.",
-        "operationId": "EvidenceController_submit",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "file": {
-                    "type": "string",
-                    "format": "binary"
-                  },
-                  "public_url": {
-                    "type": "string"
-                  },
-                  "note": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "file"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SubmissionDto"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "access-token": []
-          }
-        ],
-        "summary": "Submit proof for an assignment",
-        "tags": [
-          "evidence"
-        ]
-      }
-    },
-    "/v1/assignments/{id}/submissions": {
-      "get": {
-        "operationId": "EvidenceController_list",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SubmissionDto"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "access-token": []
-          }
-        ],
-        "summary": "My submissions for this assignment",
-        "tags": [
-          "evidence"
+          "payments"
         ]
       }
     },
@@ -2180,6 +1842,401 @@
         "summary": "Record the payout transfer you sent",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/v1/campaigns/{id}/candidates": {
+      "get": {
+        "operationId": "MatchingController_candidates",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CandidateDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Ranked eligible promoters for a campaign",
+        "tags": [
+          "matching (admin)"
+        ]
+      }
+    },
+    "/v1/campaigns/{id}/offers": {
+      "post": {
+        "operationId": "MatchingController_sendOffers",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendOffersDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OfferDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Send offers to selected promoters",
+        "tags": [
+          "matching (admin)"
+        ]
+      }
+    },
+    "/v1/offers": {
+      "get": {
+        "operationId": "OffersController_list",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OfferDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "My live offers",
+        "tags": [
+          "offers"
+        ]
+      }
+    },
+    "/v1/offers/{id}/accept": {
+      "post": {
+        "description": "Reserves a slot atomically and issues the assignment. 409 if the offer is stale or the campaign is full.",
+        "operationId": "OffersController_accept",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssignmentDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Accept an offer",
+        "tags": [
+          "offers"
+        ]
+      }
+    },
+    "/v1/offers/{id}/decline": {
+      "post": {
+        "operationId": "OffersController_decline",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Decline an offer",
+        "tags": [
+          "offers"
+        ]
+      }
+    },
+    "/r/{token}": {
+      "get": {
+        "description": "Records the click and redirects to the campaign destination. Public and unversioned. IP and user-agent are stored only as salted hashes.",
+        "operationId": "TrackingController_redirect",
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "path",
+            "description": "The assignment’s tracking token.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to the campaign destination."
+          },
+          "404": {
+            "description": "Unknown token."
+          }
+        },
+        "summary": "Follow a promoter’s tracking link",
+        "tags": [
+          "tracking"
+        ]
+      }
+    },
+    "/v1/assignments/{id}/submission": {
+      "post": {
+        "description": "A screenshot is required; public_url is optional because a WhatsApp status has none. The screenshot is perceptually hashed and compared with existing proof; a match sets auto_flag for the admin. Nothing auto-approves — every submission lands PENDING in the review queue.",
+        "operationId": "EvidenceController_submit",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "public_url": {
+                    "type": "string"
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmissionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Submit proof for an assignment",
+        "tags": [
+          "evidence"
+        ]
+      }
+    },
+    "/v1/assignments/{id}/submissions": {
+      "get": {
+        "operationId": "EvidenceController_list",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SubmissionDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "My submissions for this assignment",
+        "tags": [
+          "evidence"
         ]
       }
     },
@@ -3501,6 +3558,101 @@
           "evidence"
         ]
       },
+      "VerifyPaystackDto": {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "type": "string",
+            "example": "RLA-1a2b3c4d-9f2k84b",
+            "description": "The reference Paystack returned on the client."
+          }
+        },
+        "required": [
+          "reference"
+        ]
+      },
+      "PaymentResultDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "LIVE"
+          },
+          "message": {
+            "type": "string",
+            "example": "Payment confirmed; your campaign is live."
+          }
+        },
+        "required": [
+          "status",
+          "message"
+        ]
+      },
+      "AdminDecisionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string",
+            "example": "Recorded.",
+            "description": "What changed."
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "message"
+        ]
+      },
+      "RejectDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "example": "Screenshot does not show the campaign creative."
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "FundCampaignDto": {
+        "type": "object",
+        "properties": {
+          "amount_minor": {
+            "type": "number",
+            "example": 34500,
+            "description": "Amount received, in kobo. Must equal the campaign price."
+          },
+          "reference": {
+            "type": "string",
+            "example": "GTB transfer ref 8837261",
+            "description": "Bank reference for the transfer received."
+          }
+        },
+        "required": [
+          "amount_minor"
+        ]
+      },
+      "RecordWithdrawalPaidDto": {
+        "type": "object",
+        "properties": {
+          "paid_ref": {
+            "type": "string",
+            "example": "Zenith transfer ref 552117",
+            "description": "Reference of the transfer the admin sent."
+          }
+        },
+        "required": [
+          "paid_ref"
+        ]
+      },
       "CandidateChannelDto": {
         "type": "object",
         "properties": {
@@ -3696,71 +3848,6 @@
           "public_url",
           "note",
           "submitted_at"
-        ]
-      },
-      "AdminDecisionDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "status": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string",
-            "example": "Recorded.",
-            "description": "What changed."
-          }
-        },
-        "required": [
-          "id",
-          "status",
-          "message"
-        ]
-      },
-      "RejectDto": {
-        "type": "object",
-        "properties": {
-          "reason": {
-            "type": "string",
-            "example": "Screenshot does not show the campaign creative."
-          }
-        },
-        "required": [
-          "reason"
-        ]
-      },
-      "FundCampaignDto": {
-        "type": "object",
-        "properties": {
-          "amount_minor": {
-            "type": "number",
-            "example": 34500,
-            "description": "Amount received, in kobo. Must equal the campaign price."
-          },
-          "reference": {
-            "type": "string",
-            "example": "GTB transfer ref 8837261",
-            "description": "Bank reference for the transfer received."
-          }
-        },
-        "required": [
-          "amount_minor"
-        ]
-      },
-      "RecordWithdrawalPaidDto": {
-        "type": "object",
-        "properties": {
-          "paid_ref": {
-            "type": "string",
-            "example": "Zenith transfer ref 552117",
-            "description": "Reference of the transfer the admin sent."
-          }
-        },
-        "required": [
-          "paid_ref"
         ]
       },
       "WalletDto": {
