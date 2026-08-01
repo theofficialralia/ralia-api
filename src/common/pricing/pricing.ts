@@ -100,12 +100,64 @@ export function slotPriceMinor(
  */
 export function splitFee(
   slotPriceMinor: bigint,
-  config: PricingConfig,
+  config: Pick<PricingConfig, 'takeRateHundredths'>,
 ): { promoterFeeMinor: bigint; raliaTakeMinor: bigint } {
   const keepHundredths = BigInt(100 - config.takeRateHundredths);
   const promoterFeeMinor = divRound(slotPriceMinor * keepHundredths, 100n);
   const raliaTakeMinor = slotPriceMinor - promoterFeeMinor;
   return { promoterFeeMinor, raliaTakeMinor };
+}
+
+/**
+ * Pro-rata settlement of one delivered slot — ALGORITHMS.md §2.
+ *
+ *   delivered_ratio = min(verified, promised) / promised          (over-delivery capped at 100%)
+ *   meets_threshold = verified ≥ τ × promised                     (below τ → reject, do not pay)
+ *   delivered_gross = round(gross × min(verified, promised) / promised)
+ *   fee / take      = splitFee(delivered_gross)                   (exact — no kobo lost)
+ *   refund          = gross − delivered_gross                     → client wallet
+ *
+ * fee + take + refund = gross exactly, so escrow conserves. Integer kobo
+ * throughout; `promised` must be positive (a zero-reach promoter is never offered).
+ */
+export type SettlementConfig = {
+  takeRateHundredths: number;
+  /** τ as a whole percent: a delivery below this share of promised is rejected. */
+  deliveryThresholdPct: number;
+};
+
+export type Settlement = {
+  meetsThreshold: boolean;
+  deliveredGrossMinor: bigint;
+  promoterFeeMinor: bigint;
+  raliaTakeMinor: bigint;
+  refundMinor: bigint;
+};
+
+export function settleDelivery(
+  grossMinor: bigint,
+  verifiedReach: number,
+  promisedReach: number,
+  config: SettlementConfig,
+): Settlement {
+  if (!Number.isInteger(promisedReach) || promisedReach <= 0) {
+    throw new Error(`promisedReach must be a positive integer, got ${promisedReach}`);
+  }
+  if (!Number.isInteger(verifiedReach) || verifiedReach < 0) {
+    throw new Error(`verifiedReach must be a non-negative integer, got ${verifiedReach}`);
+  }
+  if (grossMinor < 0n) throw new Error(`grossMinor must be non-negative, got ${grossMinor}`);
+
+  // Integer-only threshold: verified/promised ≥ τ/100  ⇔  verified×100 ≥ τ×promised.
+  const meetsThreshold = verifiedReach * 100 >= config.deliveryThresholdPct * promisedReach;
+
+  // Over-delivery is capped at the promised amount — the fee is a ceiling.
+  const effective = Math.min(verifiedReach, promisedReach);
+  const deliveredGrossMinor = divRound(grossMinor * BigInt(effective), BigInt(promisedReach));
+  const { promoterFeeMinor, raliaTakeMinor } = splitFee(deliveredGrossMinor, config);
+  const refundMinor = grossMinor - deliveredGrossMinor;
+
+  return { meetsThreshold, deliveredGrossMinor, promoterFeeMinor, raliaTakeMinor, refundMinor };
 }
 
 export function objectiveMultLabel(objective: CampaignObjective): string {

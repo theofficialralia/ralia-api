@@ -2,6 +2,8 @@ import { CampaignObjective } from '@prisma/client';
 import {
   activeFilterCount,
   PricingConfig,
+  settleDelivery,
+  SettlementConfig,
   slotPriceMinor,
   splitFee,
   targetingMultHundredths,
@@ -114,6 +116,85 @@ describe('pricing (§5.2)', () => {
       expect(promoterFeeMinor).toBe(3151n);
       expect(raliaTakeMinor).toBe(1350n);
       expect(promoterFeeMinor + raliaTakeMinor).toBe(4501n);
+    });
+  });
+
+  describe('pro-rata settlement (§2)', () => {
+    // gross 3000 kobo (awareness, 1000 reach), τ = 70%, take 30%.
+    const SETTLE: SettlementConfig = { takeRateHundredths: 30, deliveryThresholdPct: 70 };
+
+    it('full delivery pays the whole fee, refunds nothing', () => {
+      const s = settleDelivery(3000n, 1000, 1000, SETTLE);
+      expect(s.meetsThreshold).toBe(true);
+      expect(s.deliveredGrossMinor).toBe(3000n);
+      expect(s.promoterFeeMinor).toBe(2100n);
+      expect(s.raliaTakeMinor).toBe(900n);
+      expect(s.refundMinor).toBe(0n);
+    });
+
+    it('over-delivery is capped at 100% — the fee is a ceiling', () => {
+      const s = settleDelivery(3000n, 1500, 1000, SETTLE);
+      expect(s.deliveredGrossMinor).toBe(3000n);
+      expect(s.refundMinor).toBe(0n);
+      expect(s.meetsThreshold).toBe(true);
+    });
+
+    it('partial delivery above the threshold pays pro-rata and refunds the delta', () => {
+      // 800/1000 ≥ 70% → paid. delivered_gross = 3000×800/1000 = 2400.
+      const s = settleDelivery(3000n, 800, 1000, SETTLE);
+      expect(s.meetsThreshold).toBe(true);
+      expect(s.deliveredGrossMinor).toBe(2400n);
+      expect(s.promoterFeeMinor).toBe(1680n); // 2400 × 0.7
+      expect(s.raliaTakeMinor).toBe(720n);
+      expect(s.refundMinor).toBe(600n); // 3000 − 2400
+    });
+
+    it('the threshold boundary is inclusive (verified = τ × promised)', () => {
+      expect(settleDelivery(3000n, 700, 1000, SETTLE).meetsThreshold).toBe(true);
+      expect(settleDelivery(3000n, 699, 1000, SETTLE).meetsThreshold).toBe(false);
+    });
+
+    it('below the threshold does not meet it (caller rejects)', () => {
+      const s = settleDelivery(3000n, 600, 1000, SETTLE);
+      expect(s.meetsThreshold).toBe(false);
+    });
+
+    it('zero delivery meets nothing and refunds the whole slot', () => {
+      const s = settleDelivery(3000n, 0, 1000, SETTLE);
+      expect(s.meetsThreshold).toBe(false);
+      expect(s.deliveredGrossMinor).toBe(0n);
+      expect(s.promoterFeeMinor).toBe(0n);
+      expect(s.refundMinor).toBe(3000n);
+    });
+
+    it('rounds without losing a kobo (odd gross, odd ratio)', () => {
+      // delivered_gross = round(4501 × 777 / 1000) = round(3497.277) = 3497
+      // fee = round(3497 × 0.7) = 2448, take = 1049, refund = 4501 − 3497 = 1004
+      const s = settleDelivery(4501n, 777, 1000, SETTLE);
+      expect(s.deliveredGrossMinor).toBe(3497n);
+      expect(s.promoterFeeMinor).toBe(2448n);
+      expect(s.raliaTakeMinor).toBe(1049n);
+      expect(s.refundMinor).toBe(1004n);
+    });
+
+    it('fee + take + refund equals gross exactly, so escrow never leaks', () => {
+      // The approve posting debits escrow by delivered_gross and refunds the rest;
+      // a one-kobo disagreement anywhere would strand money in escrow.
+      for (let gross = 0n; gross <= 20_000n; gross += 137n) {
+        for (const [verified, promised] of [[0, 1000], [1, 1000], [499, 1000], [700, 1000], [999, 1000], [1000, 1000], [5000, 5000], [3333, 5000]] as const) {
+          const s = settleDelivery(gross, verified, promised, SETTLE);
+          expect(s.promoterFeeMinor + s.raliaTakeMinor).toBe(s.deliveredGrossMinor);
+          expect(s.deliveredGrossMinor + s.refundMinor).toBe(gross);
+          expect(s.deliveredGrossMinor).toBeGreaterThanOrEqual(0n);
+          expect(s.deliveredGrossMinor).toBeLessThanOrEqual(gross);
+          expect(s.refundMinor).toBeGreaterThanOrEqual(0n);
+        }
+      }
+    });
+
+    it('rejects a non-positive promised reach and a negative verified reach', () => {
+      expect(() => settleDelivery(3000n, 500, 0, SETTLE)).toThrow();
+      expect(() => settleDelivery(3000n, -1, 1000, SETTLE)).toThrow();
     });
   });
 
