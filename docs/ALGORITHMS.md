@@ -61,7 +61,7 @@ client refund  = slot_price × (1 − delivered_ratio)     (under-delivery + unf
 ```
 Conserves in the double-entry ledger; everyone settles on delivered reach.
 
-## 3. Capability Score — per role `[new]`
+## 3. Capability Score — per role `[built: provisional inputs]`
 
 `0–100` per role a promoter holds. **Verified inputs dominate**; score is **admin-confirmed at the "under review" step**; used as an **eligibility gate + a ranking term**. Starting compositions `[knob]`:
 
@@ -71,7 +71,7 @@ Conserves in the double-entry ledger; everyone settles on delivered reach.
 | **Creator** | admin-rated samples `.5` + content breadth `.15` + equipment `.15` + camera comfort `.1` + turnaround `.1` |
 | **Participator** | task breadth `.3` + device coverage `.3` + multi-step willingness `.2` + real/aged accounts `.2` |
 
-## 4. Trust Score `[built default, rules new]`
+## 4. Trust Score `[built]`
 
 `0–100`, starts at `50`. **Asymmetric** evolution — reputation earned slowly, lost quickly `[knob]`:
 
@@ -84,21 +84,21 @@ Conserves in the double-entry ledger; everyone settles on delivered reach.
 
 Clamp to `[0, 100]`. Matching hard-filter requires `trust ≥ 30`.
 
-## 5. Reliability Score `[new]`
+## 5. Reliability Score `[built]`
 
 ```
 reliability = 0.6 × rolling_ontime_rate(60d) + 0.4 × lifetime_completion_rate     [knob]
 ```
 Rolling rewards recent delivery; lifetime rewards loyalty/longevity. No history → `0.5`.
 
-## 6. Fatigue `[new]`
+## 6. Fatigue `[built]`
 
 ```
 fatigue = min(active_campaigns_7d / max_campaigns_per_week, 1)
 ```
 Relative to the promoter's own stated weekly cap.
 
-## 7. Matching / Ranking `[built skeleton, re-weight]`
+## 7. Matching / Ranking `[built: v2]`
 
 **Hard filter:** role-eligible · `capability ≥ floor` `[knob]` · platform match · geo/age/language · `status = ACTIVE` · `trust ≥ 30`.
 
@@ -116,7 +116,7 @@ score = 0.20·capability + 0.20·(trust/100) + 0.15·reliability
   ```
 - **Transparency**: promoters see Trust/100, per-offer Fit %, capability tier, and concrete "do X to raise it" nudges.
 
-## 8. Offer Allocation `[new]`
+## 8. Offer Allocation `[built]`
 
 **Hybrid, two-phase:**
 1. **Ranked head-start** — top-fit eligible promoters get an exclusive accept window (the "Expires in" timer `[knob]`).
