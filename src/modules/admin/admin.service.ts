@@ -19,6 +19,7 @@ import { channelEffectiveReach } from '../../common/reach/effective-reach';
 import { STORAGE, StorageProvider } from '../../common/storage/storage';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
+import { AllocationService } from '../allocation/allocation.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { toMoney } from '../ledger/money';
 import { ScoringService } from '../scoring/scoring.service';
@@ -43,8 +44,22 @@ export class AdminService {
     private readonly audit: AuditService,
     private readonly rateConfig: RateConfigService,
     private readonly scoring: ScoringService,
+    private readonly allocation: AllocationService,
     @Inject(STORAGE) private readonly storage: StorageProvider,
   ) {}
+
+  /** Admin-triggered hybrid allocation pass (§8) — one round of best-fit offers. */
+  async allocateCampaign(adminId: string, campaignId: string) {
+    const result = await this.allocation.allocateCampaign(campaignId, new Date());
+    await this.audit.record({
+      actorId: adminId,
+      action: 'campaign.allocate',
+      entityType: 'campaign',
+      entityId: campaignId,
+      after: { phase: result.phase, openSlots: result.openSlots, sent: result.sent },
+    });
+    return result;
+  }
 
   // ── Users ────────────────────────────────────────────────
 

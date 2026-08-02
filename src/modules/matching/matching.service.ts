@@ -305,6 +305,12 @@ export class MatchingService {
    * first so the same offer can't be accepted twice.
    */
   async accept(offerId: string, promoterId: string): Promise<AssignmentDto> {
+    // Read the delivery window BEFORE opening the transaction: querying on this.prisma
+    // inside an interactive tx borrows a second pooled connection, which deadlocks the
+    // pool under concurrent accepts. The deadline itself is stamped inside the tx.
+    const rate = await this.rateConfig.getActive();
+    const deliveryWindowMs = rate.deliveryWindowHours * 60 * 60 * 1000;
+
     return this.prisma.$transaction(async (tx) => {
       // Lock the offer row; serialise concurrent accepts of the same offer.
       const locked = await tx.$queryRaw<{ id: string; status: OfferStatus; expires_at: Date; campaign_id: string; channel_id: string; role: string; fee_minor: bigint; gross_minor: bigint; promised_reach: number; promoter_id: string }[]>`
@@ -325,6 +331,10 @@ export class MatchingService {
       if (!campaign || campaign.status !== CampaignStatus.LIVE) {
         throw new ConflictException('This campaign is no longer accepting promoters.');
       }
+
+      // Stamp the delivery deadline at accept (§8): miss it and the sweeper reclaims
+      // the slot and dings the promoter. The window is a config knob (read above).
+      const dueAt = new Date(Date.now() + deliveryWindowMs);
 
       // Reserve one open slot, skipping any a concurrent accept holds.
       const slots = await tx.$queryRaw<{ id: string }[]>`
@@ -352,6 +362,7 @@ export class MatchingService {
           promisedReach: offer.promised_reach,
           trackingToken,
           status: AssignmentStatus.IN_PROGRESS,
+          dueAt,
         },
       });
 

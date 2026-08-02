@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 import { randomUUID } from 'node:crypto';
@@ -14,6 +15,7 @@ import { RateConfigModule } from './common/rate-config/rate-config.module';
 import { StorageModule } from './common/storage/storage.module';
 import { HealthController } from './health/health.controller';
 import { AdminModule } from './modules/admin/admin.module';
+import { AllocationModule } from './modules/allocation/allocation.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
 import { ClientsModule } from './modules/clients/clients.module';
@@ -80,6 +82,8 @@ import { WalletModule } from './modules/wallet/wallet.module';
     LedgerModule,
     AdminModule,
     WalletModule,
+    ScheduleModule.forRoot(),
+    AllocationModule,
   ],
   controllers: [HealthController],
   providers: [

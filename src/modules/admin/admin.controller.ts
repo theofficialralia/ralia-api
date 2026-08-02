@@ -101,6 +101,14 @@ export class AdminController {
     return this.admin.approveCampaign(admin.id, id);
   }
 
+  @Post('campaigns/:id/allocate')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Run one hybrid allocation pass', description: 'Extends offers to the best-fit candidates (head-start then open free-to-air), over-offering in the open phase. Idempotent.' })
+  allocateCampaign(@CurrentUser() admin: AuthedUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.admin.allocateCampaign(admin.id, id);
+  }
+
   @Post('campaigns/:id/reject')
   @HttpCode(HttpStatus.OK)
   @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)

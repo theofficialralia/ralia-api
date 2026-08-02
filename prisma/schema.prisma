@@ -904,6 +904,10 @@ model RateConfig {
   offerExpiryHours       Int    @default(24) @map("offer_expiry_hours")
   minTrustScore          Int    @default(30) @map("min_trust_score")
   withdrawalMinimumMinor BigInt @default(500000) @map("withdrawal_minimum_minor") // ₦5,000
+  // §8 allocation timers: how long an accepted assignment has to deliver proof
+  // before auto-reclaim, and the ranked head-start window before open free-to-air.
+  deliveryWindowHours    Int    @default(48) @map("delivery_window_hours")
+  headStartHours         Int    @default(12) @map("head_start_hours")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

@@ -2,7 +2,7 @@
   "name": "ralia-api",
   "version": "0.1.0",
   "private": true,
-  "description": "Ralia MVP \u2014 two-sided promotion marketplace API",
+  "description": "Ralia MVP — two-sided promotion marketplace API",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=20.0.0"
@@ -35,6 +35,7 @@
     "@nestjs/core": "^10.4.15",
     "@nestjs/jwt": "^10.2.0",
     "@nestjs/platform-express": "^10.4.15",
+    "@nestjs/schedule": "^4.1.2",
     "@nestjs/swagger": "^8.1.1",
     "@nestjs/throttler": "^6.3.0",
     "@prisma/client": "^5.22.0",
