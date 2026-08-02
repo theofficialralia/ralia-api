@@ -647,13 +647,19 @@ export class AdminService {
   async pendingWithdrawals() {
     const rows = await this.prisma.withdrawal.findMany({
       where: { status: { in: [WithdrawalStatus.REQUESTED, WithdrawalStatus.APPROVED] } },
+      include: {
+        promoter: { select: { promoterProfile: { select: { fullName: true } } } },
+        bankAccount: { select: { accountName: true, accountNumberLast4: true, bankCode: true } },
+      },
       orderBy: { createdAt: 'asc' },
     });
     return rows.map((w) => ({
       id: w.id,
       promoter_id: w.promoterId,
+      promoter_name: w.promoter.promoterProfile?.fullName ?? null,
       amount: toMoney(w.amountMinor),
       status: w.status,
+      bank: { account_name: w.bankAccount.accountName, last4: w.bankAccount.accountNumberLast4, bank_code: w.bankAccount.bankCode },
       created_at: w.createdAt.toISOString(),
     }));
   }
