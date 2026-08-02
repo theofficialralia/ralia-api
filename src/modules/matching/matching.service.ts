@@ -17,6 +17,7 @@ import { buildEligibility } from '../../common/eligibility/eligibility';
 import { slotPriceMinor, splitFee, TargetingFilters } from '../../common/pricing/pricing';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
+import { toMoney } from '../ledger/money';
 import { CandidateDto, OfferDto, AssignmentDto } from './dto/matching.dto';
 
 @Injectable()
@@ -258,6 +259,34 @@ export class MatchingService {
       throw new ConflictException(`This offer is already ${offer.status.toLowerCase()}.`);
     }
     await this.prisma.offer.update({ where: { id: offerId }, data: { status: OfferStatus.DECLINED } });
+  }
+
+  // ── Promoter: my assignments (accepted work) ─────────────
+
+  async myAssignments(promoterId: string) {
+    const rows = await this.prisma.assignment.findMany({
+      where: { promoterId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        campaign: { select: { name: true, objective: true, promoterInstructions: true, destinationUrl: true } },
+        submissions: { orderBy: { submittedAt: 'desc' }, take: 1, select: { verdict: true, rejectReason: true } },
+      },
+    });
+    return rows.map((a) => ({
+      id: a.id,
+      campaign_id: a.campaignId,
+      campaign_name: a.campaign.name,
+      objective: a.campaign.objective,
+      role: a.role,
+      fee: toMoney(a.feeMinor),
+      promised_reach: a.promisedReach,
+      status: a.status,
+      due_at: a.dueAt?.toISOString() ?? null,
+      instructions: a.campaign.promoterInstructions,
+      destination_url: a.campaign.destinationUrl,
+      latest_verdict: a.submissions[0]?.verdict ?? null,
+      reject_reason: a.submissions[0]?.rejectReason ?? null,
+    }));
   }
 
   // ── Helpers ──────────────────────────────────────────────

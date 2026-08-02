@@ -2879,6 +2879,38 @@
         ]
       }
     },
+    "/v1/assignments": {
+      "get": {
+        "description": "The campaigns I accepted, with what to do and the latest verdict.",
+        "operationId": "AssignmentsController_myAssignments",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "My assignments",
+        "tags": [
+          "assignments"
+        ]
+      }
+    },
     "/r/{token}": {
       "get": {
         "description": "Records the click and redirects to the campaign destination. Public and unversioned. IP and user-agent are stored only as salted hashes.",

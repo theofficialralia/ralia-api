@@ -42,3 +42,17 @@ export class OffersController {
     return this.matching.decline(id, user.id);
   }
 }
+
+@ApiTags('assignments')
+@ApiBearerAuth('access-token')
+@Roles(Role.PROMOTER)
+@Controller('assignments')
+export class AssignmentsController {
+  constructor(private readonly matching: MatchingService) {}
+
+  @Get()
+  @ApiOperation({ summary: 'My assignments', description: 'The campaigns I accepted, with what to do and the latest verdict.' })
+  myAssignments(@CurrentUser() user: AuthedUser) {
+    return this.matching.myAssignments(user.id);
+  }
+}
