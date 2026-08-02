@@ -6,7 +6,7 @@ import { AuthedUser } from '../../common/auth/jwt-auth.guard';
 import { RequiresCapability, Roles } from '../../common/auth/roles.guard';
 import { RequiresIdempotencyKey } from '../../common/idempotency/idempotency.guard';
 import { AdminService } from './admin.service';
-import { AdminDecisionDto, FundCampaignDto, RecordWithdrawalPaidDto, RejectDto } from './dto/admin.dto';
+import { AdminDecisionDto, ApproveSubmissionDto, FundCampaignDto, RecordWithdrawalPaidDto, RejectDto } from './dto/admin.dto';
 
 /**
  * Admin console API.
@@ -125,16 +125,17 @@ export class AdminController {
   @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
   @RequiresIdempotencyKey()
   @ApiOperation({
-    summary: 'Approve proof and pay the promoter',
-    description: 'Fee to the promoter and Ralia’s take leave escrow in one balanced transaction. Requires an Idempotency-Key.',
+    summary: 'Approve proof and settle the promoter pro-rata',
+    description: 'Pays the promoter pro-rata on verified_views, takes Ralia’s cut, and refunds the undelivered remainder to the client — all in one balanced transaction. A delivery below the threshold is refused (reject instead). Requires an Idempotency-Key.',
   })
   @ApiOkResponse({ type: AdminDecisionDto })
   approveSubmission(
     @CurrentUser() admin: AuthedUser,
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApproveSubmissionDto,
     @Headers('idempotency-key') idempotencyKey: string,
   ): Promise<AdminDecisionDto> {
-    return this.admin.approveSubmission(admin.id, id, idempotencyKey);
+    return this.admin.approveSubmission(admin.id, id, dto.verified_views, idempotencyKey);
   }
 
   @Post('submissions/:id/reject')

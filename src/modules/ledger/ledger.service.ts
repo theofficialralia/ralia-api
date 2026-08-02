@@ -333,6 +333,54 @@ export class LedgerService {
     });
   }
 
+  /**
+   * Approve a submission with pro-rata settlement (ALGORITHMS.md §2), in ONE
+   * balanced transaction so a retry can never strand a partial result:
+   *
+   *   DR CAMPAIGN_ESCROW  (fee + take + refund = the full slot gross)
+   *   CR PROMOTER_AVAILABLE  fee     (delivered pro-rata)
+   *   CR RALIA_REVENUE       take
+   *   CR CLIENT_WALLET       refund  (the undelivered remainder)
+   *
+   * Zero-amount credits are dropped — the ledger primitive requires positive
+   * entries — and dropping them preserves the balance because they contribute
+   * nothing. fee + take always equals the delivered gross, so what remains after
+   * the refund is exactly what escrow held for this slot.
+   */
+  async settleSubmission(args: {
+    submissionId: string;
+    escrowAccountId: string;
+    promoterAccountId: string;
+    clientWalletAccountId: string;
+    feeMinor: bigint;
+    takeMinor: bigint;
+    refundMinor: bigint;
+    idempotencyKey: string;
+    actorId?: string;
+  }): Promise<{ transactionId: string; replayed: boolean }> {
+    const revenue = await this.getPlatformAccountId(AccountKind.RALIA_REVENUE);
+    const grossOut = args.feeMinor + args.takeMinor + args.refundMinor;
+
+    const credits: EntryInput[] = [
+      { accountId: args.promoterAccountId, direction: EntryDirection.CREDIT, amountMinor: args.feeMinor },
+      { accountId: revenue, direction: EntryDirection.CREDIT, amountMinor: args.takeMinor },
+      { accountId: args.clientWalletAccountId, direction: EntryDirection.CREDIT, amountMinor: args.refundMinor },
+    ].filter((e) => e.amountMinor > 0n);
+
+    return this.post({
+      kind: LedgerTransactionKind.SUBMISSION_PAYOUT,
+      referenceType: 'submission',
+      referenceId: args.submissionId,
+      idempotencyKey: args.idempotencyKey,
+      memo: `Pro-rata settlement for submission ${args.submissionId}`,
+      createdBy: args.actorId,
+      entries: [
+        { accountId: args.escrowAccountId, direction: EntryDirection.DEBIT, amountMinor: grossOut },
+        ...credits,
+      ],
+    });
+  }
+
   /** Admin records that they sent the promoter's bank transfer. DR PROMOTER_AVAILABLE / CR BANK_CLEARING. */
   async payWithdrawal(args: {
     withdrawalId: string;

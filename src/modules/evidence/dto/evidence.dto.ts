@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Verdict } from '@prisma/client';
-import { Transform } from 'class-transformer';
-import { IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsInt, IsOptional, IsString, IsUrl, MaxLength, Min } from 'class-validator';
 
 export class CreateSubmissionDto {
   @ApiPropertyOptional({
@@ -19,6 +19,13 @@ export class CreateSubmissionDto {
   @MaxLength(1000)
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   note?: string;
+
+  @ApiPropertyOptional({ example: 842, description: 'Views the promoter reports on the post; the admin verifies this at approval and pay is pro-rata on the verified figure.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  claimed_views?: number;
 }
 
 export class SubmissionDto {
@@ -42,6 +49,12 @@ export class SubmissionDto {
 
   @ApiProperty({ nullable: true })
   note!: string | null;
+
+  @ApiProperty({ nullable: true, example: 842, description: 'Views the promoter reported at submission.' })
+  claimed_views!: number | null;
+
+  @ApiProperty({ nullable: true, description: 'Admin-verified delivered views, once approved.' })
+  verified_reach!: number | null;
 
   @ApiProperty({ format: 'date-time' })
   submitted_at!: string;

@@ -323,8 +323,13 @@ describe('matching — candidates, offers, accept', () => {
     const campaignId = await makeLiveCampaign(5);
     const p = await makePromoter();
     const [offer] = await matching.sendOffers(campaignId, [p.userId]);
-    // slot unit price 3450 → promoter keeps round(3450 × 0.7) = 2415
-    expect(offer!.fee_minor).toBe(2415);
+    // Per-promoter pricing: reach 2000 (20k Instagram × 0.10 × screenshot 1.0),
+    // AWARENESS, no filters → gross (2000/1000)×3000 = 6000 → fee round(6000×0.7) = 4200.
+    expect(offer!.fee_minor).toBe(4200);
+    // The gross and promised reach are frozen on the row for settlement.
+    const row = await prisma.offer.findUniqueOrThrow({ where: { id: offer!.id } });
+    expect(row.grossMinor).toBe(6000n);
+    expect(row.promisedReach).toBe(2000);
   });
 
   // ── Access control (HTTP) ────────────────────────────────

@@ -48,6 +48,7 @@ describe('admin — decisions, money and audit', () => {
   const UNIT_PRICE = 3450n; // slot price
   const FEE = 2415n; // promoter's 70%
   const TAKE = 1035n; // Ralia's 30% — fee + take must equal UNIT_PRICE
+  const PROMISED = 1000; // promised effective reach; approving with verified = PROMISED is a full delivery (refund 0)
 
   beforeAll(async () => {
     process.env.JWT_ACCESS_SECRET ??= 'test_access_secret';
@@ -165,12 +166,13 @@ describe('admin — decisions, money and audit', () => {
     const channel = await prisma.channel.findFirstOrThrow({ where: { promoterId } });
     const slot = await prisma.campaignSlot.findFirstOrThrow({ where: { campaignId } });
     const offer = await prisma.offer.create({
-      data: { campaignId, promoterId, channelId: channel.id, role: PromoterRole.DISTRIBUTOR, feeMinor: FEE, expiresAt: new Date(Date.now() + 1e6), status: 'ACCEPTED' },
+      data: { campaignId, promoterId, channelId: channel.id, role: PromoterRole.DISTRIBUTOR, feeMinor: FEE, grossMinor: UNIT_PRICE, promisedReach: PROMISED, expiresAt: new Date(Date.now() + 1e6), status: 'ACCEPTED' },
     });
     const assignment = await prisma.assignment.create({
       data: {
         offerId: offer.id, campaignId, promoterId, channelId: channel.id, slotId: slot.id,
-        role: PromoterRole.DISTRIBUTOR, feeMinor: FEE, trackingToken: randomBytes(12).toString('base64url'),
+        role: PromoterRole.DISTRIBUTOR, feeMinor: FEE, grossMinor: UNIT_PRICE, promisedReach: PROMISED,
+        trackingToken: randomBytes(12).toString('base64url'),
         status: AssignmentStatus.SUBMITTED,
       },
     });
@@ -202,7 +204,7 @@ describe('admin — decisions, money and audit', () => {
     const escrowBefore = await prisma.account.findFirstOrThrow({ where: { kind: AccountKind.CAMPAIGN_ESCROW } });
     expect(await balanceOfAccount(escrowBefore.id, AccountKind.CAMPAIGN_ESCROW)).toBe(UNIT_PRICE);
 
-    await http().post(`/admin/submissions/${submissionId}/approve`).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+    await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: PROMISED }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
 
     // Exactly one payout transaction, carrying all three legs.
     const payouts = await prisma.ledgerTransaction.findMany({
@@ -225,6 +227,35 @@ describe('admin — decisions, money and audit', () => {
 
     // fee + take is exactly the slot price — escrow leaked nothing.
     expect(FEE + TAKE).toBe(UNIT_PRICE);
+  });
+
+  it('partial delivery above the threshold pays pro-rata and refunds the client the remainder', async () => {
+    const { submissionId, promoterId, campaignId, adminId } = await makePendingSubmission();
+    const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+    const escrow = await prisma.account.findFirstOrThrow({ where: { kind: AccountKind.CAMPAIGN_ESCROW } });
+
+    // promised 1000, verified 800 (≥ 70%). delivered_gross = 3450×800/1000 = 2760;
+    // fee = round(2760×0.7) = 1932, take = 828, refund = 3450 − 2760 = 690.
+    await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: 800 }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+
+    expect(await balanceOf(AccountKind.PROMOTER_AVAILABLE, promoterId)).toBe(1932n);
+    expect(await balanceOf(AccountKind.RALIA_REVENUE)).toBe(828n);
+    expect(await balanceOf(AccountKind.CLIENT_WALLET, campaign.clientOrgId)).toBe(690n); // refund
+    expect(await balanceOfAccount(escrow.id, AccountKind.CAMPAIGN_ESCROW)).toBe(0n); // 2760 + 690 = 3450
+
+    const submission = await prisma.submission.findUniqueOrThrow({ where: { id: submissionId } });
+    expect(submission.verifiedReach).toBe(800);
+  });
+
+  it('a delivery below the threshold is refused and moves no money', async () => {
+    const { submissionId, promoterId, adminId } = await makePendingSubmission();
+
+    // verified 600 < 70% of promised 1000 → refused, so the promoter can resubmit.
+    await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: 600 }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(400);
+
+    expect(await balanceOf(AccountKind.PROMOTER_AVAILABLE, promoterId)).toBe(0n);
+    expect(await prisma.ledgerTransaction.count({ where: { kind: 'SUBMISSION_PAYOUT' } })).toBe(0);
+    expect((await prisma.submission.findUniqueOrThrow({ where: { id: submissionId } })).verdict).toBe(Verdict.PENDING);
   });
 
   async function balanceOfAccount(accountId: string, kind: AccountKind): Promise<bigint> {
@@ -308,7 +339,7 @@ describe('admin — decisions, money and audit', () => {
     const k = { 'Idempotency-Key': randomUUID() };
 
     for (let i = 0; i < 5; i++) {
-      await http().post(`/admin/submissions/${submissionId}/approve`).set(bearer(adminId, [Role.ADMIN])).set(k).expect(200);
+      await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: PROMISED }).set(bearer(adminId, [Role.ADMIN])).set(k).expect(200);
     }
 
     expect(await balanceOf(AccountKind.PROMOTER_AVAILABLE, promoterId)).toBe(FEE);
@@ -377,9 +408,9 @@ describe('admin — decisions, money and audit', () => {
 
   it('a submission cannot be decided twice', async () => {
     const { submissionId, adminId } = await makePendingSubmission();
-    await http().post(`/admin/submissions/${submissionId}/approve`).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+    await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: PROMISED }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
     // A different key — this is a genuine second decision, not a replay.
-    await http().post(`/admin/submissions/${submissionId}/approve`).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(409);
+    await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: PROMISED }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(409);
     await http().post(`/admin/submissions/${submissionId}/reject`).set(bearer(adminId, [Role.ADMIN]))
       .send({ reason: 'changed my mind about this' }).expect(409);
   });
@@ -388,7 +419,7 @@ describe('admin — decisions, money and audit', () => {
 
   it('runs a withdrawal from request through recorded payout', async () => {
     const { submissionId, promoterId, adminId } = await makePendingSubmission();
-    await http().post(`/admin/submissions/${submissionId}/approve`).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+    await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: PROMISED }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
     expect(await balanceOf(AccountKind.PROMOTER_AVAILABLE, promoterId)).toBe(FEE);
 
     // Below the ₦5,000 minimum, so this balance cannot be withdrawn yet.
@@ -399,7 +430,7 @@ describe('admin — decisions, money and audit', () => {
 
     // Top the promoter up past the minimum via more approved work.
     const second = await makePendingSubmissionFor(promoterId, adminId);
-    await http().post(`/admin/submissions/${second}/approve`).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+    await http().post(`/admin/submissions/${second}/approve`).send({ verified_views: PROMISED }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
 
     await prisma.$executeRawUnsafe('SELECT 1'); // no-op; balances are derived
     const balance = await balanceOf(AccountKind.PROMOTER_AVAILABLE, promoterId);
@@ -436,12 +467,13 @@ describe('admin — decisions, money and audit', () => {
     const channel = await prisma.channel.findFirstOrThrow({ where: { promoterId } });
     const slot = await prisma.campaignSlot.findFirstOrThrow({ where: { campaignId } });
     const offer = await prisma.offer.create({
-      data: { campaignId, promoterId, channelId: channel.id, role: PromoterRole.DISTRIBUTOR, feeMinor: FEE, expiresAt: new Date(Date.now() + 1e6), status: 'ACCEPTED' },
+      data: { campaignId, promoterId, channelId: channel.id, role: PromoterRole.DISTRIBUTOR, feeMinor: FEE, grossMinor: UNIT_PRICE, promisedReach: PROMISED, expiresAt: new Date(Date.now() + 1e6), status: 'ACCEPTED' },
     });
     const assignment = await prisma.assignment.create({
       data: {
         offerId: offer.id, campaignId, promoterId, channelId: channel.id, slotId: slot.id,
-        role: PromoterRole.DISTRIBUTOR, feeMinor: FEE, trackingToken: randomBytes(12).toString('base64url'),
+        role: PromoterRole.DISTRIBUTOR, feeMinor: FEE, grossMinor: UNIT_PRICE, promisedReach: PROMISED,
+        trackingToken: randomBytes(12).toString('base64url'),
         status: AssignmentStatus.SUBMITTED,
       },
     });
@@ -451,7 +483,7 @@ describe('admin — decisions, money and audit', () => {
 
   it('cannot withdraw more than the unencumbered balance', async () => {
     const { submissionId, promoterId, adminId } = await makePendingSubmission();
-    await http().post(`/admin/submissions/${submissionId}/approve`).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+    await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: PROMISED }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
     await prisma.rateConfig.updateMany({ where: { isActive: true }, data: { withdrawalMinimumMinor: 100n } });
 
     await http().post('/withdrawals').set(bearer(promoterId, [Role.PROMOTER])).send({ amount_minor: Number(FEE) }).expect(201);
@@ -461,7 +493,7 @@ describe('admin — decisions, money and audit', () => {
 
   it('a withdrawal can only be recorded paid after approval', async () => {
     const { submissionId, promoterId, adminId } = await makePendingSubmission();
-    await http().post(`/admin/submissions/${submissionId}/approve`).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+    await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: PROMISED }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
     await prisma.rateConfig.updateMany({ where: { isActive: true }, data: { withdrawalMinimumMinor: 100n } });
     const w = await http().post('/withdrawals').set(bearer(promoterId, [Role.PROMOTER])).send({ amount_minor: Number(FEE) }).expect(201);
 

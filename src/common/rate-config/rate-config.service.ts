@@ -1,6 +1,6 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { CampaignObjective, Platform, Prisma, RateConfig, VerificationTier } from '@prisma/client';
-import { PricingConfig } from '../pricing/pricing';
+import { PricingConfig, SettlementConfig } from '../pricing/pricing';
 import { ReachFactors } from '../reach/effective-reach';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -70,6 +70,15 @@ export class RateConfigService {
       targetingStepHundredths: toHundredths(c.targetingStep),
       targetingCapHundredths: toHundredths(c.targetingCap),
       takeRateHundredths: toHundredths(c.takeRate),
+    };
+  }
+
+  /** §2 pro-rata settlement coefficients: the take rate and the delivery threshold τ. */
+  async getSettlementConfig(): Promise<SettlementConfig> {
+    const c = await this.getActive();
+    return {
+      takeRateHundredths: toHundredths(c.takeRate),
+      deliveryThresholdPct: c.deliveryThresholdPct,
     };
   }
 }

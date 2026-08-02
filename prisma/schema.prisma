@@ -536,6 +536,11 @@ model Offer {
   role       PromoterRole
   score      Decimal?     @db.Decimal(6, 4)
   feeMinor   BigInt       @map("fee_minor")
+  // Gross slot price and the promoter's promised effective reach, frozen at offer
+  // time — settlement pro-rates against these (ALGORITHMS.md §2). Default 0
+  // backfills legacy rows; the matching code always sets both on new offers.
+  grossMinor    BigInt    @default(0) @map("gross_minor")
+  promisedReach Int       @default(0) @map("promised_reach")
   expiresAt  DateTime     @map("expires_at")
   status     OfferStatus  @default(SENT)
   createdAt  DateTime     @default(now()) @map("created_at")
@@ -563,6 +568,10 @@ model Assignment {
   slotId        String?          @unique @map("slot_id") @db.Uuid
   role          PromoterRole
   feeMinor      BigInt           @map("fee_minor")
+  // Copied from the offer at accept — the frozen gross and promised reach this
+  // assignment settles against (ALGORITHMS.md §2).
+  grossMinor    BigInt           @default(0) @map("gross_minor")
+  promisedReach Int              @default(0) @map("promised_reach")
   trackingToken String           @unique @map("tracking_token")
   status        AssignmentStatus @default(IN_PROGRESS)
   dueAt         DateTime?        @map("due_at")
@@ -628,6 +637,10 @@ model Submission {
   submittedAt  DateTime  @default(now()) @map("submitted_at")
   publicUrl    String?   @map("public_url")
   note         String?
+  // Promoter-entered at submit; admin/OCR-verified at approval. verifiedReach is
+  // the delivered effective views that drive pro-rata pay (ALGORITHMS.md §2/§9).
+  claimedViews  Int?     @map("claimed_views")
+  verifiedReach Int?     @map("verified_reach")
   autoFlag     Boolean   @default(false) @map("auto_flag")
   verdict      Verdict   @default(PENDING)
   reviewedBy   String?   @map("reviewed_by") @db.Uuid
@@ -808,6 +821,8 @@ model RateConfig {
   targetingStep       Decimal @default(0.05) @map("targeting_step") @db.Decimal(4, 2)
   targetingCap        Decimal @default(1.35) @map("targeting_cap") @db.Decimal(4, 2)
   takeRate            Decimal @default(0.30) @map("take_rate") @db.Decimal(4, 2)
+  // τ — a delivery below this share of promised reach is rejected, not paid (§2).
+  deliveryThresholdPct Int    @default(70) @map("delivery_threshold_pct")
 
   // §5.1 effective reach — platform factors
   factorWhatsappStatus Decimal @default(0.30) @map("factor_whatsapp_status") @db.Decimal(4, 2)

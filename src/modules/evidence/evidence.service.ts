@@ -88,6 +88,7 @@ export class EvidenceService {
           assignmentId,
           publicUrl: dto.public_url ?? null,
           note: dto.note ?? null,
+          claimedViews: dto.claimed_views ?? null,
           autoFlag: reuseOfId !== null,
           verdict: Verdict.PENDING,
         },
@@ -157,6 +158,8 @@ function toDto(s: Submission): SubmissionDto {
     auto_flag: s.autoFlag,
     public_url: s.publicUrl,
     note: s.note,
+    claimed_views: s.claimedViews,
+    verified_reach: s.verifiedReach,
     submitted_at: s.submittedAt.toISOString(),
   };
 }

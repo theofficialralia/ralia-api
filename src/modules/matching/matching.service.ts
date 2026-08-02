@@ -14,8 +14,7 @@ import {
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { buildEligibility } from '../../common/eligibility/eligibility';
-import { TargetingFilters } from '../../common/pricing/pricing';
-import { splitFee } from '../../common/pricing/pricing';
+import { slotPriceMinor, splitFee, TargetingFilters } from '../../common/pricing/pricing';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
 import { CandidateDto, OfferDto, AssignmentDto } from './dto/matching.dto';
@@ -117,7 +116,6 @@ export class MatchingService {
     if (!slot) throw new BadRequestException('This campaign has no slots.');
 
     const config = await this.rateConfig.getPricingConfig();
-    const { promoterFeeMinor } = splitFee(slot.unitPriceMinor, config);
     const rate = await this.rateConfig.getActive();
     const filters = toFilters(campaign.targeting);
     const { channelWhere } = buildEligibility(filters, rate.minTrustScore);
@@ -136,6 +134,14 @@ export class MatchingService {
         throw new BadRequestException(`Promoter ${promoterId} has no channel matching this campaign.`);
       }
 
+      // Per-promoter pricing: the fee is priced from THIS promoter's effective
+      // reach, and the gross + promised reach are frozen on the offer so
+      // settlement can pro-rate against them (ALGORITHMS.md §2). Escrow can't be
+      // overspent — the ledger's non-negative guard catches over-commitment at
+      // payout — so no budget pre-check is enforced here (admin controls the pool).
+      const grossMinor = slotPriceMinor(channel.effectiveReach, campaign.objective, filters, config);
+      const { promoterFeeMinor } = splitFee(grossMinor, config);
+
       try {
         const offer = await this.prisma.offer.create({
           data: {
@@ -144,6 +150,8 @@ export class MatchingService {
             channelId: channel.id,
             role,
             feeMinor: promoterFeeMinor,
+            grossMinor,
+            promisedReach: channel.effectiveReach,
             expiresAt,
             status: OfferStatus.SENT,
           },
@@ -183,8 +191,8 @@ export class MatchingService {
   async accept(offerId: string, promoterId: string): Promise<AssignmentDto> {
     return this.prisma.$transaction(async (tx) => {
       // Lock the offer row; serialise concurrent accepts of the same offer.
-      const locked = await tx.$queryRaw<{ id: string; status: OfferStatus; expires_at: Date; campaign_id: string; channel_id: string; role: string; fee_minor: bigint; promoter_id: string }[]>`
-        SELECT id, status, expires_at, campaign_id, channel_id, role, fee_minor, promoter_id
+      const locked = await tx.$queryRaw<{ id: string; status: OfferStatus; expires_at: Date; campaign_id: string; channel_id: string; role: string; fee_minor: bigint; gross_minor: bigint; promised_reach: number; promoter_id: string }[]>`
+        SELECT id, status, expires_at, campaign_id, channel_id, role, fee_minor, gross_minor, promised_reach, promoter_id
         FROM offers WHERE id = ${offerId}::uuid FOR UPDATE`;
       const offer = locked[0];
 
@@ -224,6 +232,8 @@ export class MatchingService {
           slotId: slot.id,
           role: offer.role as never,
           feeMinor: offer.fee_minor,
+          grossMinor: offer.gross_minor,
+          promisedReach: offer.promised_reach,
           trackingToken,
           status: AssignmentStatus.IN_PROGRESS,
         },

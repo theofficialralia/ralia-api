@@ -8,7 +8,9 @@ import {
   Verdict,
   WithdrawalStatus,
 } from '@prisma/client';
+import { settleDelivery } from '../../common/pricing/pricing';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { RateConfigService } from '../../common/rate-config/rate-config.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { toMoney } from '../ledger/money';
 import { AuditService } from './audit.service';
@@ -30,6 +32,7 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly ledger: LedgerService,
     private readonly audit: AuditService,
+    private readonly rateConfig: RateConfigService,
   ) {}
 
   // ── Users ────────────────────────────────────────────────
@@ -223,16 +226,23 @@ export class AdminService {
   // ── Submissions ──────────────────────────────────────────
 
   /**
-   * Approve proof and pay the promoter.
+   * Approve proof and pay the promoter pro-rata on the verified views
+   * (ALGORITHMS.md §2). The delivered fee, Ralia's take, and the client's refund
+   * of the undelivered remainder all move in ONE balanced transaction, so escrow
+   * settles to exactly what it held for the slot and a retry can't strand any leg.
    *
-   * The fee and Ralia's take leave escrow in ONE balanced transaction (§5.6);
-   * the take is derived by subtraction so the two always sum to exactly the slot
-   * price and escrow cannot leak a kobo.
+   * A delivery below the threshold cannot be approved here — it is rejected so the
+   * promoter can resubmit, which is the §2 delivery floor.
    */
-  async approveSubmission(adminId: string, submissionId: string, idempotencyKey: string): Promise<AdminDecisionDto> {
+  async approveSubmission(
+    adminId: string,
+    submissionId: string,
+    verifiedViews: number,
+    idempotencyKey: string,
+  ): Promise<AdminDecisionDto> {
     const submission = await this.prisma.submission.findUnique({
       where: { id: submissionId },
-      include: { assignment: { include: { campaign: true, slot: true } } },
+      include: { assignment: { include: { campaign: true } } },
     });
     if (!submission) throw new NotFoundException('No such submission.');
 
@@ -252,28 +262,39 @@ export class AdminService {
     if (!campaign.escrowAccountId) {
       throw new BadRequestException('This campaign was never funded — there is nothing to pay from.');
     }
-    if (!assignment.slot) {
-      throw new BadRequestException('This assignment holds no slot, so its price is unknown.');
+    if (assignment.promisedReach <= 0) {
+      throw new BadRequestException('This assignment has no promised reach recorded, so it cannot be settled pro-rata.');
     }
 
-    const feeMinor = assignment.feeMinor;
-    const takeMinor = assignment.slot.unitPriceMinor - feeMinor;
-    if (takeMinor < 0n) {
-      throw new BadRequestException('The promoter fee exceeds the slot price.');
+    const config = await this.rateConfig.getSettlementConfig();
+    const settlement = settleDelivery(assignment.grossMinor, verifiedViews, assignment.promisedReach, config);
+
+    // The §2 delivery floor: below the threshold, approval is refused so the
+    // promoter can resubmit rather than be part-paid for an under-delivery.
+    if (!settlement.meetsThreshold) {
+      throw new BadRequestException(
+        `Verified ${verifiedViews} views is below the ${config.deliveryThresholdPct}% threshold of the promised ${assignment.promisedReach}. Reject this submission so the promoter can resubmit.`,
+      );
     }
 
     const promoterAccountId = await this.ledger.getOrCreateAccount(
       AccountKind.PROMOTER_AVAILABLE,
       assignment.promoterId,
     );
+    const clientWalletAccountId = await this.ledger.getOrCreateAccount(
+      AccountKind.CLIENT_WALLET,
+      campaign.clientOrgId,
+    );
 
-    // One transaction: fee to the promoter, take to Ralia, both out of escrow.
-    const { replayed } = await this.ledger.payoutSubmission({
+    // Fee, take and the undelivered refund all move out of escrow together.
+    const { replayed } = await this.ledger.settleSubmission({
       submissionId,
       escrowAccountId: campaign.escrowAccountId,
       promoterAccountId,
-      feeMinor,
-      takeMinor,
+      clientWalletAccountId,
+      feeMinor: settlement.promoterFeeMinor,
+      takeMinor: settlement.raliaTakeMinor,
+      refundMinor: settlement.refundMinor,
       idempotencyKey,
       actorId: adminId,
     });
@@ -282,7 +303,7 @@ export class AdminService {
       await this.prisma.$transaction(async (tx) => {
         await tx.submission.update({
           where: { id: submissionId },
-          data: { verdict: Verdict.APPROVED, reviewedBy: adminId, reviewedAt: new Date() },
+          data: { verdict: Verdict.APPROVED, verifiedReach: verifiedViews, reviewedBy: adminId, reviewedAt: new Date() },
         });
         await tx.assignment.update({ where: { id: assignment.id }, data: { status: AssignmentStatus.PAID } });
         await this.audit.record(
@@ -292,14 +313,22 @@ export class AdminService {
             entityType: 'submission',
             entityId: submissionId,
             before: { verdict: Verdict.PENDING, assignmentStatus: assignment.status },
-            after: { verdict: Verdict.APPROVED, assignmentStatus: AssignmentStatus.PAID, feeMinor, takeMinor },
+            after: {
+              verdict: Verdict.APPROVED,
+              assignmentStatus: AssignmentStatus.PAID,
+              verifiedReach: verifiedViews,
+              promisedReach: assignment.promisedReach,
+              feeMinor: settlement.promoterFeeMinor,
+              takeMinor: settlement.raliaTakeMinor,
+              refundMinor: settlement.refundMinor,
+            },
           },
           tx,
         );
       });
     }
 
-    return { id: submissionId, status: Verdict.APPROVED, message: replayed ? 'Already recorded.' : 'Approved and paid.' };
+    return { id: submissionId, status: Verdict.APPROVED, message: replayed ? 'Already recorded.' : 'Approved and settled.' };
   }
 
   async rejectSubmission(adminId: string, submissionId: string, reason: string): Promise<AdminDecisionDto> {

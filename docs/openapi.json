@@ -1638,7 +1638,7 @@
     },
     "/v1/admin/submissions/{id}/approve": {
       "post": {
-        "description": "Fee to the promoter and Ralia’s take leave escrow in one balanced transaction. Requires an Idempotency-Key.",
+        "description": "Pays the promoter pro-rata on verified_views, takes Ralia’s cut, and refunds the undelivered remainder to the client — all in one balanced transaction. A delivery below the threshold is refused (reject instead). Requires an Idempotency-Key.",
         "operationId": "AdminController_approveSubmission",
         "parameters": [
           {
@@ -1668,6 +1668,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveSubmissionDto"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "",
@@ -1685,7 +1695,7 @@
             "access-token": []
           }
         ],
-        "summary": "Approve proof and pay the promoter",
+        "summary": "Approve proof and settle the promoter pro-rata",
         "tags": [
           "admin"
         ]
@@ -3630,6 +3640,19 @@
           "amount_minor"
         ]
       },
+      "ApproveSubmissionDto": {
+        "type": "object",
+        "properties": {
+          "verified_views": {
+            "type": "number",
+            "example": 842,
+            "description": "Admin-verified delivered effective views. Drives pro-rata pay; below the delivery threshold, approval is refused."
+          }
+        },
+        "required": [
+          "verified_views"
+        ]
+      },
       "RecordWithdrawalPaidDto": {
         "type": "object",
         "properties": {
@@ -4115,6 +4138,17 @@
             "type": "object",
             "nullable": true
           },
+          "claimed_views": {
+            "type": "object",
+            "nullable": true,
+            "example": 842,
+            "description": "Views the promoter reported at submission."
+          },
+          "verified_reach": {
+            "type": "object",
+            "nullable": true,
+            "description": "Admin-verified delivered views, once approved."
+          },
           "submitted_at": {
             "type": "string",
             "format": "date-time"
@@ -4127,6 +4161,8 @@
           "auto_flag",
           "public_url",
           "note",
+          "claimed_views",
+          "verified_reach",
           "submitted_at"
         ]
       },

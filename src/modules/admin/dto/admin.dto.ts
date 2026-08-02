@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsInt, IsOptional, IsPositive, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsInt, IsOptional, IsPositive, IsString, MaxLength, Min, MinLength } from 'class-validator';
 import { MoneyDto } from '../../ledger/money';
 
 /** Rejecting anything requires a reason (§6). */
@@ -11,6 +11,15 @@ export class RejectDto {
   @MaxLength(500)
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   reason!: string;
+}
+
+/** Approving proof settles it pro-rata on the verified delivered views (§2). */
+export class ApproveSubmissionDto {
+  @ApiProperty({ example: 842, description: 'Admin-verified delivered effective views. Drives pro-rata pay; below the delivery threshold, approval is refused.' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  verified_views!: number;
 }
 
 export class FundCampaignDto {
