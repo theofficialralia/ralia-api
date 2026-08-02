@@ -78,6 +78,13 @@ export class AdminController {
 
   // ── Campaigns ────────────────────────────────────────────
 
+  @Get('live-campaigns')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Live/paused campaigns', description: 'The campaigns an admin can match promoters to.' })
+  liveCampaigns() {
+    return this.admin.liveCampaigns();
+  }
+
   @Get('campaigns/:id')
   @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
   @ApiOperation({ summary: 'Campaign detail for review', description: 'Client, brief, targeting and assets — for approval and matching context.' })

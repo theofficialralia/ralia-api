@@ -531,6 +531,25 @@ export class AdminService {
     }));
   }
 
+  /** Live/paused campaigns — the ones the admin matches promoters to. */
+  async liveCampaigns() {
+    const rows = await this.prisma.campaign.findMany({
+      where: { status: { in: [CampaignStatus.LIVE, CampaignStatus.PAUSED] } },
+      orderBy: { updatedAt: 'desc' },
+      include: { clientOrg: { select: { name: true } } },
+    });
+    return rows.map((c) => ({
+      id: c.id,
+      name: c.name,
+      status: c.status,
+      objective: c.objective,
+      slots_total: c.slotsTotal,
+      slots_filled: c.slotsFilled,
+      client_name: c.clientOrg.name,
+      price: c.priceMinor === null ? null : toMoney(c.priceMinor),
+    }));
+  }
+
   /** Full campaign for the admin review panel and matching context. */
   async campaignDetail(campaignId: string) {
     const c = await this.prisma.campaign.findUnique({
