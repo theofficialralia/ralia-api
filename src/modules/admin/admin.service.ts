@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
   AccountKind,
   AssignmentStatus,
@@ -13,6 +13,7 @@ import {
 } from '@prisma/client';
 import { settleDelivery } from '../../common/pricing/pricing';
 import { channelEffectiveReach } from '../../common/reach/effective-reach';
+import { STORAGE, StorageProvider } from '../../common/storage/storage';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -37,6 +38,7 @@ export class AdminService {
     private readonly ledger: LedgerService,
     private readonly audit: AuditService,
     private readonly rateConfig: RateConfigService,
+    @Inject(STORAGE) private readonly storage: StorageProvider,
   ) {}
 
   // ── Users ────────────────────────────────────────────────
@@ -600,24 +602,46 @@ export class AdminService {
     const rows = await this.prisma.submission.findMany({
       where: { verdict: Verdict.PENDING },
       include: {
-        artifacts: { select: { id: true, phash: true, reuseOfId: true } },
-        assignment: { select: { id: true, campaignId: true, promoterId: true, feeMinor: true } },
+        artifacts: { select: { id: true, reuseOfId: true, file: { select: { storageKey: true } } } },
+        assignment: {
+          select: {
+            id: true,
+            campaignId: true,
+            promoterId: true,
+            feeMinor: true,
+            promisedReach: true,
+            campaign: { select: { name: true, objective: true } },
+            promoter: { select: { promoterProfile: { select: { fullName: true } } } },
+          },
+        },
       },
       orderBy: { submittedAt: 'asc' },
     });
-    return rows.map((s) => ({
-      id: s.id,
-      assignment_id: s.assignmentId,
-      campaign_id: s.assignment.campaignId,
-      promoter_id: s.assignment.promoterId,
-      fee: toMoney(s.assignment.feeMinor),
-      auto_flag: s.autoFlag,
-      public_url: s.publicUrl,
-      note: s.note,
-      submitted_at: s.submittedAt.toISOString(),
-      // reuse_of_id is what tells the admin this screenshot was seen before.
-      artifacts: s.artifacts.map((a) => ({ id: a.id, reuse_of_id: a.reuseOfId })),
-    }));
+    return Promise.all(
+      rows.map(async (s) => {
+        const primary = s.artifacts[0];
+        return {
+          id: s.id,
+          assignment_id: s.assignmentId,
+          campaign_id: s.assignment.campaignId,
+          campaign_name: s.assignment.campaign.name,
+          objective: s.assignment.campaign.objective,
+          promoter_id: s.assignment.promoterId,
+          promoter_name: s.assignment.promoter.promoterProfile?.fullName ?? null,
+          fee: toMoney(s.assignment.feeMinor),
+          promised_reach: s.assignment.promisedReach,
+          claimed_views: s.claimedViews,
+          auto_flag: s.autoFlag,
+          public_url: s.publicUrl,
+          note: s.note,
+          // Signed URL so the admin can open the actual screenshot to verify the count.
+          image_url: primary?.file ? await this.storage.signedUrl(primary.file.storageKey) : null,
+          submitted_at: s.submittedAt.toISOString(),
+          // reuse_of_id tells the admin this screenshot perceptually matched an earlier one.
+          artifacts: s.artifacts.map((a) => ({ id: a.id, reuse_of_id: a.reuseOfId })),
+        };
+      }),
+    );
   }
 
   async pendingWithdrawals() {

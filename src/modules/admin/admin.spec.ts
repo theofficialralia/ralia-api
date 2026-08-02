@@ -26,6 +26,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { JwtAuthGuard } from '../../common/auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/auth/roles.guard';
 import { CryptoModule } from '../../common/crypto/crypto.module';
+import { STORAGE } from '../../common/storage/storage';
 import { IdempotencyGuard } from '../../common/idempotency/idempotency.guard';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -70,6 +71,8 @@ describe('admin — decisions, money and audit', () => {
         { provide: APP_GUARD, useClass: IdempotencyGuard },
       ],
     })
+      .overrideProvider(STORAGE)
+      .useValue({ signedUrl: async (key: string) => `https://files.test/${key}` })
       .overrideProvider(PrismaService)
       .useValue(prisma)
       .compile();
