@@ -1468,6 +1468,46 @@
         ]
       }
     },
+    "/v1/admin/campaigns/{id}": {
+      "get": {
+        "description": "Client, brief, targeting and assets — for approval and matching context.",
+        "operationId": "AdminController_campaignDetail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Campaign detail for review",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/campaigns/{id}/approve": {
       "post": {
         "description": "Moves it to CONFIRMING_PAYMENT; funding makes it LIVE.",

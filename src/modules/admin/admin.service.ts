@@ -531,6 +531,52 @@ export class AdminService {
     }));
   }
 
+  /** Full campaign for the admin review panel and matching context. */
+  async campaignDetail(campaignId: string) {
+    const c = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+      include: {
+        clientOrg: { select: { id: true, name: true, industry: true } },
+        targeting: true,
+        assets: { orderBy: { orderIndex: 'asc' }, select: { id: true, kind: true, captionText: true, fileId: true } },
+      },
+    });
+    if (!c) throw new NotFoundException('No such campaign.');
+    return {
+      id: c.id,
+      name: c.name,
+      status: c.status,
+      objective: c.objective,
+      description: c.description,
+      promoter_instructions: c.promoterInstructions,
+      destination_url: c.destinationUrl,
+      needs_creative: c.needsCreative,
+      slots_total: c.slotsTotal,
+      slots_filled: c.slotsFilled,
+      price: c.priceMinor === null ? null : toMoney(c.priceMinor),
+      budget: toMoney(c.budgetMinor),
+      quoted_at: c.quotedAt?.toISOString() ?? null,
+      starts_at: c.startsAt?.toISOString() ?? null,
+      ends_at: c.endsAt?.toISOString() ?? null,
+      client: { org_id: c.clientOrg.id, name: c.clientOrg.name, industry: c.clientOrg.industry },
+      targeting: c.targeting
+        ? {
+            states: c.targeting.states,
+            lgas: c.targeting.lgas,
+            age_min: c.targeting.ageMin,
+            age_max: c.targeting.ageMax,
+            genders: c.targeting.genders,
+            languages: c.targeting.languages,
+            categories: c.targeting.categories,
+            platforms: c.targeting.platforms,
+            min_effective_reach: c.targeting.minEffectiveReach,
+            roles: c.targeting.roles,
+          }
+        : null,
+      assets: c.assets.map((a) => ({ id: a.id, kind: a.kind, caption_text: a.captionText, file_id: a.fileId })),
+    };
+  }
+
   async pendingSubmissions() {
     const rows = await this.prisma.submission.findMany({
       where: { verdict: Verdict.PENDING },

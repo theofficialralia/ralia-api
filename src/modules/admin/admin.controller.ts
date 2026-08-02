@@ -78,6 +78,13 @@ export class AdminController {
 
   // ── Campaigns ────────────────────────────────────────────
 
+  @Get('campaigns/:id')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Campaign detail for review', description: 'Client, brief, targeting and assets — for approval and matching context.' })
+  campaignDetail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.admin.campaignDetail(id);
+  }
+
   @Post('campaigns/:id/approve')
   @HttpCode(HttpStatus.OK)
   @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)

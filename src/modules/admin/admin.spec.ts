@@ -614,4 +614,14 @@ describe('admin — decisions, money and audit', () => {
     expect(after.effectiveReach).toBe(2000); // recapped
     expect(await prisma.auditLog.count({ where: { action: 'channel.unverify' } })).toBe(1);
   });
+
+  it('returns campaign detail for the review panel', async () => {
+    const adminId = await makeAdmin();
+    const campaignId = await makeApprovedCampaign(2);
+    const res = await http().get(`/admin/campaigns/${campaignId}`).set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect(res.body.slots_total).toBe(2);
+    expect(res.body.client.name).toMatch(/^Org/);
+    expect(res.body.price.amount_minor).toBe(Number(UNIT_PRICE) * 2);
+    expect(res.body.objective).toBe('AWARENESS');
+  });
 });
