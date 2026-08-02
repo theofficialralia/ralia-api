@@ -21,6 +21,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { toMoney } from '../ledger/money';
+import { ScoringService } from '../scoring/scoring.service';
 import { AuditService } from './audit.service';
 import { AdminDecisionDto, GatewayPaymentDto, RateConfigUpdateDto, ReconciliationReportDto } from './dto/admin.dto';
 
@@ -41,6 +42,7 @@ export class AdminService {
     private readonly ledger: LedgerService,
     private readonly audit: AuditService,
     private readonly rateConfig: RateConfigService,
+    private readonly scoring: ScoringService,
     @Inject(STORAGE) private readonly storage: StorageProvider,
   ) {}
 
@@ -309,12 +311,26 @@ export class AdminService {
     });
 
     if (!replayed) {
+      const now = new Date();
+      // On-time = the approved submission landed by the delivery deadline. No deadline
+      // set → treat as on-time (nothing to be late against). Drives the trust delta (§4)
+      // and the reliability cache (§5).
+      const deliveredOnTime = assignment.dueAt === null || submission.submittedAt <= assignment.dueAt;
       await this.prisma.$transaction(async (tx) => {
         await tx.submission.update({
           where: { id: submissionId },
-          data: { verdict: Verdict.APPROVED, verifiedReach: verifiedViews, reviewedBy: adminId, reviewedAt: new Date() },
+          data: { verdict: Verdict.APPROVED, verifiedReach: verifiedViews, reviewedBy: adminId, reviewedAt: now },
         });
-        await tx.assignment.update({ where: { id: assignment.id }, data: { status: AssignmentStatus.PAID } });
+        await tx.assignment.update({
+          where: { id: assignment.id },
+          data: { status: AssignmentStatus.PAID, paidAt: now, deliveredOnTime },
+        });
+        await this.scoring.recordDeliveryOutcome(
+          assignment.promoterId,
+          deliveredOnTime ? 'ON_TIME_DELIVERY' : 'LATE_DELIVERY',
+          now,
+          tx,
+        );
         await this.audit.record(
           {
             actorId: adminId,
@@ -350,10 +366,11 @@ export class AdminService {
       throw new ConflictException(`This submission is already ${submission.verdict.toLowerCase()}.`);
     }
 
+    const now = new Date();
     await this.prisma.$transaction(async (tx) => {
       await tx.submission.update({
         where: { id: submissionId },
-        data: { verdict: Verdict.REJECTED, reviewedBy: adminId, reviewedAt: new Date(), rejectReason: reason },
+        data: { verdict: Verdict.REJECTED, reviewedBy: adminId, reviewedAt: now, rejectReason: reason },
       });
       // Back to REJECTED so the promoter can submit again — a rejection is
       // feedback, not the end of the assignment.
@@ -361,6 +378,9 @@ export class AdminService {
         where: { id: submission.assignmentId },
         data: { status: AssignmentStatus.REJECTED },
       });
+      // A rejected submission dings trust (−6, §4). The assignment stays open, so
+      // this does not touch the completed/reliability counts.
+      await this.scoring.recordDeliveryOutcome(submission.assignment.promoterId, 'REJECTED', now, tx);
       await this.audit.record(
         {
           actorId: adminId,

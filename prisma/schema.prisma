@@ -249,6 +249,11 @@ model PromoterProfile {
   preferredCategories String[]      @map("preferred_categories")
   maxCampaignsPerWeek Int           @default(3) @map("max_campaigns_per_week")
   trustScore         Decimal        @default(50) @map("trust_score") @db.Decimal(5, 2)
+  // Reputation cache maintained by ScoringService on every delivery outcome
+  // (ALGORITHMS.md §5/§7): reliability blends recent on-time delivery with lifetime
+  // completion; completedDeliveries feeds the "proven" test in the newbie gate.
+  reliability         Decimal       @default(0.5) @map("reliability") @db.Decimal(4, 3)
+  completedDeliveries Int           @default(0) @map("completed_deliveries")
 
   // Remaining questionnaire surface. Columns exist from day one; the API exposes
   // them in the B3 harden slice (docs/BACKEND_PLAN.md §03).
@@ -579,6 +584,11 @@ model Assignment {
   trackingToken String           @unique @map("tracking_token")
   status        AssignmentStatus @default(IN_PROGRESS)
   dueAt         DateTime?        @map("due_at")
+  // Set at settlement: paidAt is the approval timestamp (drives the 60-day rolling
+  // reliability window); deliveredOnTime records whether the approved submission
+  // landed by dueAt, so reliability is a pure aggregate over assignments (§5).
+  paidAt          DateTime? @map("paid_at")
+  deliveredOnTime Boolean?  @map("delivered_on_time")
   createdAt     DateTime         @default(now()) @map("created_at")
   updatedAt     DateTime         @updatedAt @map("updated_at")
 

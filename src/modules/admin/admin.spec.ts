@@ -230,6 +230,17 @@ describe('admin — decisions, money and audit', () => {
 
     // fee + take is exactly the slot price — escrow leaked nothing.
     expect(FEE + TAKE).toBe(UNIT_PRICE);
+
+    // Reputation moved with the money (R2-2): on-time delivery lifts trust 60→62
+    // (fixture starts at 60), marks the assignment paid/on-time, and recomputes the
+    // reliability cache to a perfect 1.0 (lifetime 1/1, rolling 1/1).
+    const profile = await prisma.promoterProfile.findUniqueOrThrow({ where: { userId: promoterId } });
+    expect(profile.trustScore.toNumber()).toBe(62);
+    expect(profile.completedDeliveries).toBe(1);
+    expect(profile.reliability.toNumber()).toBeCloseTo(1, 3);
+    const paidAssignment = await prisma.assignment.findFirstOrThrow({ where: { promoterId } });
+    expect(paidAssignment.deliveredOnTime).toBe(true);
+    expect(paidAssignment.paidAt).not.toBeNull();
   });
 
   it('partial delivery above the threshold pays pro-rata and refunds the client the remainder', async () => {
@@ -259,6 +270,18 @@ describe('admin — decisions, money and audit', () => {
     expect(await balanceOf(AccountKind.PROMOTER_AVAILABLE, promoterId)).toBe(0n);
     expect(await prisma.ledgerTransaction.count({ where: { kind: 'SUBMISSION_PAYOUT' } })).toBe(0);
     expect((await prisma.submission.findUniqueOrThrow({ where: { id: submissionId } })).verdict).toBe(Verdict.PENDING);
+  });
+
+  it('rejecting a submission dings the promoter trust −6 and leaves the assignment resubmittable', async () => {
+    const { submissionId, promoterId, adminId } = await makePendingSubmission();
+
+    await http().post(`/admin/submissions/${submissionId}/reject`).send({ reason: 'Screenshot is unreadable.' }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+
+    const profile = await prisma.promoterProfile.findUniqueOrThrow({ where: { userId: promoterId } });
+    expect(profile.trustScore.toNumber()).toBe(54); // 60 − 6, asymmetric (§4)
+    expect(profile.completedDeliveries).toBe(0); // a rejection is not a completed delivery
+    const assignment = await prisma.assignment.findFirstOrThrow({ where: { promoterId } });
+    expect(assignment.status).toBe(AssignmentStatus.REJECTED); // resubmittable, not terminal
   });
 
   async function balanceOfAccount(accountId: string, kind: AccountKind): Promise<bigint> {
