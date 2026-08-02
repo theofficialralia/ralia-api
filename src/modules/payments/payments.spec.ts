@@ -113,6 +113,13 @@ describe('payments — Paystack verify + fund', () => {
     expect(await escrowBalance(campaignId)).toBe(PRICE);
     expect(await prisma.ledgerTransaction.count({ where: { kind: 'CAMPAIGN_FUNDING' } })).toBe(1);
     expect(await prisma.auditLog.count({ where: { action: 'campaign.fund.paystack' } })).toBe(1);
+
+    // A reconciliation row opens, linked to the funding ledger transaction (§10).
+    const gp = await prisma.gatewayPayment.findUniqueOrThrow({ where: { reference: 'RLA-abc-123' } });
+    expect(gp.status).toBe('RECORDED');
+    expect(gp.expectedMinor).toBe(PRICE);
+    expect(gp.gatewayMinor).toBe(PRICE);
+    expect(gp.ledgerTransactionId).not.toBeNull();
   });
 
   it('rejects a payment whose amount does not match the price', async () => {
@@ -142,6 +149,8 @@ describe('payments — Paystack verify + fund', () => {
     }
     expect(await escrowBalance(campaignId)).toBe(PRICE);
     expect(await prisma.ledgerTransaction.count({ where: { kind: 'CAMPAIGN_FUNDING' } })).toBe(1);
+    // The reconciliation row opens exactly once, too.
+    expect(await prisma.gatewayPayment.count({ where: { reference: ref } })).toBe(1);
   });
 
   it('requires an Idempotency-Key', async () => {

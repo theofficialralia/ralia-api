@@ -6,7 +6,7 @@ import { AuthedUser } from '../../common/auth/jwt-auth.guard';
 import { RequiresCapability, Roles } from '../../common/auth/roles.guard';
 import { RequiresIdempotencyKey } from '../../common/idempotency/idempotency.guard';
 import { AdminService } from './admin.service';
-import { AdminDecisionDto, ApproveSubmissionDto, FundCampaignDto, RecordWithdrawalPaidDto, RejectDto } from './dto/admin.dto';
+import { AdminDecisionDto, ApproveSubmissionDto, FundCampaignDto, ReconciliationReportDto, RecordWithdrawalPaidDto, RejectDto, SettleGatewayPaymentDto } from './dto/admin.dto';
 
 /**
  * Admin console API.
@@ -178,5 +178,47 @@ export class AdminController {
     @Headers('idempotency-key') idempotencyKey: string,
   ): Promise<AdminDecisionDto> {
     return this.admin.recordWithdrawalPaid(admin.id, id, dto.paid_ref, idempotencyKey);
+  }
+
+  // ── Gateway reconciliation ───────────────────────────────
+
+  @Get('reconciliation')
+  @RequiresCapability(AdminCapability.RECORD_MONEY)
+  @ApiOperation({
+    summary: 'Reconcile gateway charges against the ledger',
+    description: 'Per charge: campaign price vs gateway-reported vs the escrow credit the ledger holds. ledger_matches_gateway is the overall proof.',
+  })
+  @ApiOkResponse({ type: ReconciliationReportDto })
+  reconciliation(): Promise<ReconciliationReportDto> {
+    return this.admin.reconciliationReport();
+  }
+
+  @Post('reconciliation/:id/settle')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.RECORD_MONEY)
+  @ApiOperation({
+    summary: 'Confirm a gateway settlement cleared',
+    description: 'RECORDED → SETTLED, recording the settlement reference and the amount actually settled (net of gateway fees).',
+  })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  settleGatewayPayment(
+    @CurrentUser() admin: AuthedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SettleGatewayPaymentDto,
+  ): Promise<AdminDecisionDto> {
+    return this.admin.settleGatewayPayment(admin.id, id, dto.settlement_ref, BigInt(dto.settled_minor));
+  }
+
+  @Post('reconciliation/:id/flag')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.RECORD_MONEY)
+  @ApiOperation({ summary: 'Flag a settlement discrepancy (reason required)', description: '→ MISMATCH for finance to investigate.' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  flagGatewayPayment(
+    @CurrentUser() admin: AuthedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectDto,
+  ): Promise<AdminDecisionDto> {
+    return this.admin.flagGatewayPayment(admin.id, id, dto.reason);
   }
 }

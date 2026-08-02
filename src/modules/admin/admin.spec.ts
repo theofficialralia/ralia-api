@@ -514,4 +514,60 @@ describe('admin — decisions, money and audit', () => {
     const submissions = await http().get('/admin/queues/submissions').set(bearer(adminId, [Role.ADMIN])).expect(200);
     expect(submissions.body.map((s: { id: string }) => s.id)).toContain(submissionId);
   });
+
+  // ── Gateway reconciliation ───────────────────────────────
+
+  /** A funded campaign with a gateway_payments row linked to its funding ledger tx. */
+  async function makeGatewayPayment(gatewayMinor: bigint = UNIT_PRICE): Promise<{ adminId: string; paymentId: string }> {
+    const adminId = await makeAdmin();
+    const campaignId = await makeApprovedCampaign(1);
+    await http().post(`/admin/campaigns/${campaignId}/fund`).set(bearer(adminId, [Role.ADMIN])).set(key())
+      .send({ amount_minor: Number(UNIT_PRICE) }).expect(200);
+    const fundingTx = await prisma.ledgerTransaction.findFirstOrThrow({ where: { kind: 'CAMPAIGN_FUNDING', referenceId: campaignId } });
+    const gp = await prisma.gatewayPayment.create({
+      data: { campaignId, reference: `REF-${seq++}`, expectedMinor: UNIT_PRICE, gatewayMinor, ledgerTransactionId: fundingTx.id },
+    });
+    return { adminId, paymentId: gp.id };
+  }
+
+  it('reconciles a gateway charge against the ledger escrow credit', async () => {
+    const { adminId } = await makeGatewayPayment();
+    const res = await http().get('/admin/reconciliation').set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect(res.body.ledger_matches_gateway).toBe(true);
+    expect(res.body.recorded).toBe(1);
+    expect(res.body.gateway_total.amount_minor).toBe(Number(UNIT_PRICE));
+    expect(res.body.payments[0].matched).toBe(true);
+    expect(res.body.payments[0].ledger.amount_minor).toBe(Number(UNIT_PRICE));
+  });
+
+  it('marks a charge unmatched when the ledger credit disagrees with the gateway amount', async () => {
+    const { adminId } = await makeGatewayPayment(UNIT_PRICE + 100n); // gateway claims 100 more than escrow holds
+    const res = await http().get('/admin/reconciliation').set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect(res.body.ledger_matches_gateway).toBe(false);
+    expect(res.body.payments[0].matched).toBe(false);
+  });
+
+  it('records a settlement (RECORDED → SETTLED) and refuses a double settle', async () => {
+    const { adminId, paymentId } = await makeGatewayPayment();
+    await http().post(`/admin/reconciliation/${paymentId}/settle`).set(bearer(adminId, [Role.ADMIN]))
+      .send({ settlement_ref: 'PSTK_STL_1', settled_minor: Number(UNIT_PRICE) - 50 }).expect(200);
+
+    const after = await http().get('/admin/reconciliation').set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect(after.body.settled).toBe(1);
+    expect(after.body.recorded).toBe(0);
+    expect(after.body.settled_total.amount_minor).toBe(Number(UNIT_PRICE) - 50);
+    expect(await prisma.auditLog.count({ where: { action: 'gateway.settle' } })).toBe(1);
+
+    await http().post(`/admin/reconciliation/${paymentId}/settle`).set(bearer(adminId, [Role.ADMIN]))
+      .send({ settlement_ref: 'PSTK_STL_1', settled_minor: Number(UNIT_PRICE) }).expect(409);
+  });
+
+  it('flags a settlement discrepancy for finance', async () => {
+    const { adminId, paymentId } = await makeGatewayPayment();
+    await http().post(`/admin/reconciliation/${paymentId}/flag`).set(bearer(adminId, [Role.ADMIN]))
+      .send({ reason: 'Settlement short beyond the gateway fee' }).expect(200);
+    const res = await http().get('/admin/reconciliation').set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect(res.body.mismatched).toBe(1);
+    expect(await prisma.auditLog.count({ where: { action: 'gateway.flag' } })).toBe(1);
+  });
 });

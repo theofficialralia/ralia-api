@@ -4,7 +4,9 @@ import {
   AssignmentStatus,
   CampaignStatus,
   ChannelStatus,
+  EntryDirection,
   PromoterStatus,
+  ReconciliationStatus,
   Verdict,
   WithdrawalStatus,
 } from '@prisma/client';
@@ -14,7 +16,7 @@ import { RateConfigService } from '../../common/rate-config/rate-config.service'
 import { LedgerService } from '../ledger/ledger.service';
 import { toMoney } from '../ledger/money';
 import { AuditService } from './audit.service';
-import { AdminDecisionDto } from './dto/admin.dto';
+import { AdminDecisionDto, GatewayPaymentDto, ReconciliationReportDto } from './dto/admin.dto';
 
 /**
  * Admin decisions. Everything here writes an audit row in the same transaction
@@ -533,5 +535,123 @@ export class AdminService {
       status: w.status,
       created_at: w.createdAt.toISOString(),
     }));
+  }
+
+  // ── Gateway reconciliation (§10) ─────────────────────────
+
+  /**
+   * Reconcile every gateway charge against the ledger: each row shows the price
+   * the charge was for, what the gateway reported, and the escrow credit the
+   * ledger actually holds — the three should agree. `matched` is false the moment
+   * any two diverge; `ledger_matches_gateway` is the overall proof.
+   */
+  async reconciliationReport(): Promise<ReconciliationReportDto> {
+    const payments = await this.prisma.gatewayPayment.findMany({ orderBy: { createdAt: 'desc' } });
+
+    const txIds = payments.map((p) => p.ledgerTransactionId).filter((id): id is string => id !== null);
+    const credits = txIds.length
+      ? await this.prisma.ledgerEntry.groupBy({
+          by: ['transactionId'],
+          where: { transactionId: { in: txIds }, direction: EntryDirection.CREDIT },
+          _sum: { amountMinor: true },
+        })
+      : [];
+    const ledgerByTx = new Map(credits.map((c) => [c.transactionId, c._sum.amountMinor ?? 0n]));
+
+    let gatewayTotal = 0n;
+    let settledTotal = 0n;
+    let allMatch = true;
+    const counts = { recorded: 0, settled: 0, mismatched: 0 };
+
+    const rows: GatewayPaymentDto[] = payments.map((p) => {
+      const ledgerMinor = p.ledgerTransactionId ? ledgerByTx.get(p.ledgerTransactionId) ?? 0n : 0n;
+      const matched = ledgerMinor === p.gatewayMinor;
+      if (!matched) allMatch = false;
+      gatewayTotal += p.gatewayMinor;
+      settledTotal += p.settledMinor ?? 0n;
+      if (p.status === ReconciliationStatus.RECORDED) counts.recorded++;
+      else if (p.status === ReconciliationStatus.SETTLED) counts.settled++;
+      else counts.mismatched++;
+
+      return {
+        id: p.id,
+        campaign_id: p.campaignId,
+        reference: p.reference,
+        expected: toMoney(p.expectedMinor),
+        gateway: toMoney(p.gatewayMinor),
+        ledger: toMoney(ledgerMinor),
+        matched,
+        status: p.status,
+        settled: p.settledMinor === null ? null : toMoney(p.settledMinor),
+        settlement_ref: p.settlementRef,
+        settled_at: p.settledAt?.toISOString() ?? null,
+      };
+    });
+
+    return {
+      gateway_total: toMoney(gatewayTotal),
+      settled_total: toMoney(settledTotal),
+      ledger_matches_gateway: allMatch,
+      recorded: counts.recorded,
+      settled: counts.settled,
+      mismatched: counts.mismatched,
+      payments: rows,
+    };
+  }
+
+  /** Confirm a gateway settlement cleared: RECORDED → SETTLED. */
+  async settleGatewayPayment(adminId: string, id: string, settlementRef: string, settledMinor: bigint): Promise<AdminDecisionDto> {
+    const gp = await this.prisma.gatewayPayment.findUnique({ where: { id } });
+    if (!gp) throw new NotFoundException('No such gateway payment.');
+    if (gp.status !== ReconciliationStatus.RECORDED) {
+      throw new ConflictException(`This payment is already ${gp.status.toLowerCase()}.`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.gatewayPayment.update({
+        where: { id },
+        data: { status: ReconciliationStatus.SETTLED, settlementRef, settledMinor, settledBy: adminId, settledAt: new Date() },
+      });
+      await this.audit.record(
+        {
+          actorId: adminId,
+          action: 'gateway.settle',
+          entityType: 'gateway_payment',
+          entityId: id,
+          before: { status: gp.status },
+          after: { status: ReconciliationStatus.SETTLED, settlementRef, settledMinor },
+        },
+        tx,
+      );
+    });
+
+    return { id, status: ReconciliationStatus.SETTLED, message: 'Settlement recorded.' };
+  }
+
+  /** Flag a settlement discrepancy for finance: → MISMATCH. */
+  async flagGatewayPayment(adminId: string, id: string, reason: string): Promise<AdminDecisionDto> {
+    const gp = await this.prisma.gatewayPayment.findUnique({ where: { id } });
+    if (!gp) throw new NotFoundException('No such gateway payment.');
+    if (gp.status === ReconciliationStatus.MISMATCH) {
+      throw new ConflictException('This payment is already flagged.');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.gatewayPayment.update({ where: { id }, data: { status: ReconciliationStatus.MISMATCH, note: reason } });
+      await this.audit.record(
+        {
+          actorId: adminId,
+          action: 'gateway.flag',
+          entityType: 'gateway_payment',
+          entityId: id,
+          before: { status: gp.status },
+          after: { status: ReconciliationStatus.MISMATCH },
+          reason,
+        },
+        tx,
+      );
+    });
+
+    return { id, status: ReconciliationStatus.MISMATCH, message: 'Flagged for finance.' };
   }
 }

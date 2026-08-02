@@ -53,7 +53,7 @@ export class PaymentsService {
     const escrowAccountId =
       campaign.escrowAccountId ?? (await this.ledger.getOrCreateAccount(AccountKind.CAMPAIGN_ESCROW, campaignId));
 
-    await this.ledger.fundCampaign({
+    const { transactionId, replayed } = await this.ledger.fundCampaign({
       campaignId,
       escrowAccountId,
       amountMinor: campaign.priceMinor,
@@ -61,24 +61,40 @@ export class PaymentsService {
       actorId: userId,
     });
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.campaign.update({
-        where: { id: campaignId },
-        data: { status: CampaignStatus.LIVE, escrowAccountId },
+    // Only the first funding of this reference takes the campaign live and opens
+    // the reconciliation row — a concurrent replay must not re-audit or collide
+    // on the unique reference.
+    if (!replayed) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.campaign.update({
+          where: { id: campaignId },
+          data: { status: CampaignStatus.LIVE, escrowAccountId },
+        });
+        // Open a reconciliation row: the charge is confirmed and escrow funded,
+        // but settlement is confirmed later by finance (§10).
+        await tx.gatewayPayment.create({
+          data: {
+            campaignId,
+            reference,
+            expectedMinor: campaign.priceMinor as bigint,
+            gatewayMinor: BigInt(v.amountMinor),
+            ledgerTransactionId: transactionId,
+          },
+        });
+        await this.audit.record(
+          {
+            actorId: userId,
+            action: 'campaign.fund.paystack',
+            entityType: 'campaign',
+            entityId: campaignId,
+            before: { status: campaign.status },
+            after: { status: CampaignStatus.LIVE, amountMinor: campaign.priceMinor, reference },
+            reason: `Paystack ${reference}`,
+          },
+          tx,
+        );
       });
-      await this.audit.record(
-        {
-          actorId: userId,
-          action: 'campaign.fund.paystack',
-          entityType: 'campaign',
-          entityId: campaignId,
-          before: { status: campaign.status },
-          after: { status: CampaignStatus.LIVE, amountMinor: campaign.priceMinor, reference },
-          reason: `Paystack ${reference}`,
-        },
-        tx,
-      );
-    });
+    }
 
     return { status: CampaignStatus.LIVE, message: 'Payment confirmed; your campaign is live.' };
   }

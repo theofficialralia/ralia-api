@@ -1869,6 +1869,159 @@
         ]
       }
     },
+    "/v1/admin/reconciliation": {
+      "get": {
+        "description": "Per charge: campaign price vs gateway-reported vs the escrow credit the ledger holds. ledger_matches_gateway is the overall proof.",
+        "operationId": "AdminController_reconciliation",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationReportDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Reconcile gateway charges against the ledger",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/reconciliation/{id}/settle": {
+      "post": {
+        "description": "RECORDED → SETTLED, recording the settlement reference and the amount actually settled (net of gateway fees).",
+        "operationId": "AdminController_settleGatewayPayment",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettleGatewayPaymentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Confirm a gateway settlement cleared",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/reconciliation/{id}/flag": {
+      "post": {
+        "description": "→ MISMATCH for finance to investigate.",
+        "operationId": "AdminController_flagGatewayPayment",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Flag a settlement discrepancy (reason required)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/dashboard/summary": {
       "get": {
         "description": "Top-line spend, views and promoter counts, plus a per-campaign rollup for the table.",
@@ -3664,6 +3817,164 @@
         },
         "required": [
           "paid_ref"
+        ]
+      },
+      "GatewayPaymentDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaign_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reference": {
+            "type": "string",
+            "example": "RLA-9F2K-84B"
+          },
+          "expected": {
+            "description": "The campaign price the charge was for.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "gateway": {
+            "description": "What the gateway reported at verify time.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "ledger": {
+            "description": "The escrow credit the ledger actually holds for this reference.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "matched": {
+            "type": "boolean",
+            "example": true,
+            "description": "Whether the ledger credit equals the gateway amount."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "RECORDED",
+              "SETTLED",
+              "MISMATCH"
+            ]
+          },
+          "settled": {
+            "nullable": true,
+            "description": "Amount confirmed settled, once reconciled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "settlement_ref": {
+            "type": "object",
+            "nullable": true
+          },
+          "settled_at": {
+            "type": "object",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "campaign_id",
+          "reference",
+          "expected",
+          "gateway",
+          "ledger",
+          "matched",
+          "status",
+          "settled",
+          "settlement_ref",
+          "settled_at"
+        ]
+      },
+      "ReconciliationReportDto": {
+        "type": "object",
+        "properties": {
+          "gateway_total": {
+            "description": "Total the gateway reported across all charges.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "settled_total": {
+            "description": "Total confirmed settled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "ledger_matches_gateway": {
+            "type": "boolean",
+            "example": true,
+            "description": "True when every ledger escrow credit equals its gateway amount."
+          },
+          "recorded": {
+            "type": "number",
+            "example": 3,
+            "description": "Charges awaiting settlement confirmation."
+          },
+          "settled": {
+            "type": "number",
+            "example": 10
+          },
+          "mismatched": {
+            "type": "number",
+            "example": 0
+          },
+          "payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GatewayPaymentDto"
+            }
+          }
+        },
+        "required": [
+          "gateway_total",
+          "settled_total",
+          "ledger_matches_gateway",
+          "recorded",
+          "settled",
+          "mismatched",
+          "payments"
+        ]
+      },
+      "SettleGatewayPaymentDto": {
+        "type": "object",
+        "properties": {
+          "settlement_ref": {
+            "type": "string",
+            "example": "PSTK_STL_20260803",
+            "description": "The gateway settlement batch reference."
+          },
+          "settled_minor": {
+            "type": "number",
+            "example": 261000,
+            "description": "Amount actually settled, in kobo (net of gateway fees)."
+          }
+        },
+        "required": [
+          "settlement_ref",
+          "settled_minor"
         ]
       },
       "DashboardCampaignRowDto": {

@@ -447,6 +447,7 @@ model Campaign {
   slots        CampaignSlot[]
   offers       Offer[]
   assignments  Assignment[]
+  gatewayPayments GatewayPayment[]
 
   @@index([clientOrgId, status])
   @@index([status])
@@ -784,6 +785,49 @@ model Withdrawal {
   @@index([promoterId, status])
   @@index([status])
   @@map("withdrawals")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Gateway reconciliation (ALGORITHMS.md §10)
+// ─────────────────────────────────────────────────────────────
+// One row per gateway charge that funded a campaign. The charge is confirmed at
+// pay time (campaign goes live), but a charge is not settled money — finance
+// reconciles each row against the gateway's settlement and confirms or flags it.
+
+enum PaymentProvider {
+  PAYSTACK
+}
+
+enum ReconciliationStatus {
+  RECORDED // charge captured and escrow funded; awaiting settlement confirmation
+  SETTLED  // settlement confirmed against the gateway
+  MISMATCH // settlement discrepancy flagged for finance
+}
+
+model GatewayPayment {
+  id                  String               @id @default(uuid()) @db.Uuid
+  campaignId          String               @map("campaign_id") @db.Uuid
+  provider            PaymentProvider      @default(PAYSTACK)
+  reference           String               @unique
+  // What the campaign price was, versus what the gateway reported at verify.
+  // Equal at RECORDED time (funding rejects a mismatch); settlement may differ.
+  expectedMinor       BigInt               @map("expected_minor")
+  gatewayMinor        BigInt               @map("gateway_minor")
+  ledgerTransactionId String?              @map("ledger_transaction_id") @db.Uuid
+  status              ReconciliationStatus @default(RECORDED)
+  settlementRef       String?              @map("settlement_ref")
+  settledMinor        BigInt?              @map("settled_minor")
+  settledBy           String?              @map("settled_by") @db.Uuid
+  settledAt           DateTime?            @map("settled_at")
+  note                String?
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  @@index([status])
+  @@index([campaignId])
+  @@map("gateway_payments")
 }
 
 model AuditLog {
