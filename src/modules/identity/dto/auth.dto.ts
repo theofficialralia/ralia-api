@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
+import { AdminCapability, Role } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
@@ -147,6 +147,9 @@ export class MeDto {
 
   @ApiProperty({ enum: Role, isArray: true })
   roles!: Role[];
+
+  @ApiProperty({ enum: AdminCapability, isArray: true, description: 'Admin capabilities, flattened across roles.' })
+  capabilities!: AdminCapability[];
 
   @ApiProperty()
   status!: string;

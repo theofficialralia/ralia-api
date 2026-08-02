@@ -3052,6 +3052,17 @@
               ]
             }
           },
+          "capabilities": {
+            "type": "array",
+            "description": "Admin capabilities, flattened across roles.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "REVIEW_EVIDENCE",
+                "RECORD_MONEY"
+              ]
+            }
+          },
           "status": {
             "type": "string"
           },
@@ -3065,6 +3076,7 @@
           "email",
           "phone_e164",
           "roles",
+          "capabilities",
           "status",
           "phone_verified_at"
         ]

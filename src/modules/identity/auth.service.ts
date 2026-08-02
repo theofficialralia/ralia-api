@@ -206,6 +206,9 @@ export class AuthService {
       email: user.email,
       phone_e164: user.phoneE164,
       roles: user.roles.map((r) => r.role),
+      // Flattened admin capabilities, so a console can show only the actions this
+      // admin may take (the backend still enforces them per-endpoint).
+      capabilities: [...new Set(user.roles.flatMap((r) => r.capabilities))],
       status: user.status,
       phone_verified_at: user.phoneVerifiedAt,
     };

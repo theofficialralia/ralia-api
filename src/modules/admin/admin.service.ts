@@ -473,7 +473,22 @@ export class AdminService {
   async pendingPromoters() {
     const rows = await this.prisma.promoterProfile.findMany({
       where: { status: PromoterStatus.AWAITING_APPROVAL },
-      include: { user: { select: { email: true, phoneE164: true } } },
+      include: {
+        user: {
+          select: {
+            email: true,
+            phoneE164: true,
+            channels: {
+              orderBy: { effectiveReach: 'desc' },
+              select: {
+                id: true, platform: true, handle: true, url: true, claimedAudience: true,
+                effectiveReach: true, verificationTier: true, verifiedAt: true,
+                isGroup: true, groupMembers: true, activeParticipants: true, status: true,
+              },
+            },
+          },
+        },
+      },
       orderBy: { updatedAt: 'asc' },
     });
     return rows.map((p) => ({
@@ -483,6 +498,21 @@ export class AdminService {
       trust_score: p.trustScore.toNumber(),
       email: p.user.email,
       phone_e164: p.user.phoneE164,
+      // The admin checks these against the claimed reach before approving (§5.3).
+      channels: p.user.channels.map((c) => ({
+        id: c.id,
+        platform: c.platform,
+        handle: c.handle,
+        url: c.url,
+        claimed_audience: c.claimedAudience,
+        effective_reach: c.effectiveReach,
+        verification_tier: c.verificationTier,
+        verified_at: c.verifiedAt?.toISOString() ?? null,
+        is_group: c.isGroup,
+        group_members: c.groupMembers,
+        active_participants: c.activeParticipants,
+        status: c.status,
+      })),
     }));
   }
 
