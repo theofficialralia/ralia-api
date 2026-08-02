@@ -1,5 +1,11 @@
 import { Platform, VerificationTier } from '@prisma/client';
-import { computeEffectiveReach, DEFAULT_REACH_FACTORS } from './effective-reach';
+import {
+  channelEffectiveReach,
+  computeEffectiveReach,
+  currentTier,
+  DEFAULT_REACH_FACTORS,
+  ReachPolicy,
+} from './effective-reach';
 
 /**
  * §5.1: effective_reach = round(claimed × platform_factor × verification_factor)
@@ -108,6 +114,97 @@ describe('effective reach (§5.1)', () => {
       expect(computeEffectiveReach(1000, Platform.INSTAGRAM, VerificationTier.SCREENSHOT, doubled)).toBe(200);
       // The default is untouched by the override.
       expect(computeEffectiveReach(1000, Platform.INSTAGRAM, VerificationTier.SCREENSHOT)).toBe(100);
+    });
+  });
+});
+
+/**
+ * §1 policy on top of the flat core: group basis, the self-reported cap, and
+ * proof decay. Every expected number is worked by hand.
+ */
+describe('reach policy (§1)', () => {
+  const POLICY: ReachPolicy = {
+    factors: DEFAULT_REACH_FACTORS,
+    unverifiedReachCap: 2000,
+    proofValidityDays: 90,
+  };
+  const NOW = new Date('2026-08-02T00:00:00Z');
+  const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000);
+
+  const base = {
+    platform: Platform.INSTAGRAM,
+    claimedAudience: 100_000,
+    isGroup: false,
+    activeParticipants: null as number | null,
+    verificationTier: VerificationTier.SELF,
+    verifiedAt: null as Date | null,
+  };
+
+  describe('group basis', () => {
+    it('counts active participants, not total members', () => {
+      // WhatsApp group 0.20 × active 500 × screenshot 1.0 = 100 — NOT the 1000 the
+      // 5,000 members would give.
+      const reach = channelEffectiveReach(
+        { platform: Platform.WHATSAPP_GROUP, claimedAudience: 5000, isGroup: true, activeParticipants: 500, verificationTier: VerificationTier.SCREENSHOT, verifiedAt: daysAgo(1) },
+        POLICY,
+        NOW,
+      );
+      expect(reach).toBe(100);
+    });
+
+    it('a group with no active count is worth nothing', () => {
+      const reach = channelEffectiveReach(
+        { platform: Platform.TELEGRAM, claimedAudience: 9000, isGroup: true, activeParticipants: null, verificationTier: VerificationTier.SCREENSHOT, verifiedAt: daysAgo(1) },
+        POLICY,
+        NOW,
+      );
+      expect(reach).toBe(0);
+    });
+  });
+
+  describe('the self-reported cap', () => {
+    it('caps self-reported reach at the ceiling', () => {
+      // 100000 × 0.10 × 0.6 = 6000, capped to 2000.
+      expect(channelEffectiveReach(base, POLICY, NOW)).toBe(2000);
+    });
+
+    it('a verified proof lifts the cap', () => {
+      // 100000 × 0.10 × 1.0 = 10000, uncapped.
+      const reach = channelEffectiveReach({ ...base, verificationTier: VerificationTier.SCREENSHOT, verifiedAt: daysAgo(10) }, POLICY, NOW);
+      expect(reach).toBe(10_000);
+    });
+
+    it('does not cap when self-reported reach is already under the ceiling', () => {
+      // 5000 × 0.10 × 0.6 = 300.
+      expect(channelEffectiveReach({ ...base, claimedAudience: 5000 }, POLICY, NOW)).toBe(300);
+    });
+  });
+
+  describe('proof decay', () => {
+    it('a fresh proof keeps its multiplier', () => {
+      expect(channelEffectiveReach({ ...base, verificationTier: VerificationTier.INSIGHTS, verifiedAt: daysAgo(30) }, POLICY, NOW)).toBe(11_500);
+    });
+
+    it('a stale proof decays to self-reported and is capped', () => {
+      // 100 days > 90 → SELF → 6000 capped to 2000.
+      expect(channelEffectiveReach({ ...base, verificationTier: VerificationTier.SCREENSHOT, verifiedAt: daysAgo(100) }, POLICY, NOW)).toBe(2000);
+    });
+
+    it('a verified tier with no proof timestamp is treated as unproven', () => {
+      expect(channelEffectiveReach({ ...base, verificationTier: VerificationTier.INSIGHTS, verifiedAt: null }, POLICY, NOW)).toBe(2000);
+    });
+  });
+
+  describe('currentTier', () => {
+    it('SELF stays SELF', () => {
+      expect(currentTier(VerificationTier.SELF, daysAgo(1), 90, NOW)).toBe(VerificationTier.SELF);
+    });
+    it('the validity boundary is inclusive (exactly 90 days still counts)', () => {
+      expect(currentTier(VerificationTier.SCREENSHOT, daysAgo(90), 90, NOW)).toBe(VerificationTier.SCREENSHOT);
+      expect(currentTier(VerificationTier.SCREENSHOT, daysAgo(91), 90, NOW)).toBe(VerificationTier.SELF);
+    });
+    it('a verified tier with no timestamp decays', () => {
+      expect(currentTier(VerificationTier.INSIGHTS, null, 90, NOW)).toBe(VerificationTier.SELF);
     });
   });
 });

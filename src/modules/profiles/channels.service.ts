@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Channel, ChannelStatus, Platform, VerificationTier } from '@prisma/client';
-import { computeEffectiveReach } from '../../common/reach/effective-reach';
+import { channelEffectiveReach } from '../../common/reach/effective-reach';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ChannelDto, CreateChannelDto } from './dto/profile.dto';
@@ -32,12 +32,14 @@ export class ChannelsService {
       }
     }
 
-    const factors = await this.rateConfig.getReachFactors();
+    const policy = await this.rateConfig.getReachPolicy();
 
     // Tier is SELF on creation, always. The promoter uploads evidence and an
     // admin verifies it (B8); a client-settable tier would let a promoter apply
     // their own 1.15× multiplier and price their own slot.
     const verificationTier = VerificationTier.SELF;
+    const isGroup = dto.is_group ?? false;
+    const activeParticipants = dto.active_participants ?? null;
 
     const channel = await this.prisma.channel.create({
       data: {
@@ -46,12 +48,17 @@ export class ChannelsService {
         handle: dto.handle ?? null,
         url: dto.url ?? null,
         claimedAudience: dto.claimed_audience,
-        isGroup: dto.is_group ?? false,
+        isGroup,
         isGroupAdmin: dto.is_group_admin ?? false,
         groupMembers: dto.group_members ?? null,
-        activeParticipants: dto.active_participants ?? null,
+        activeParticipants,
         verificationTier,
-        effectiveReach: computeEffectiveReach(dto.claimed_audience, dto.platform, verificationTier, factors),
+        // §1: groups count active participants; self-reported reach is capped.
+        effectiveReach: channelEffectiveReach(
+          { platform: dto.platform, claimedAudience: dto.claimed_audience, isGroup, activeParticipants, verificationTier, verifiedAt: null },
+          policy,
+          new Date(),
+        ),
         status: ChannelStatus.PENDING_REVIEW,
       },
     });
@@ -94,12 +101,18 @@ export class ChannelsService {
     const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
     if (!channel) throw new NotFoundException('No such channel.');
 
-    const factors = await this.rateConfig.getReachFactors();
-    const effectiveReach = computeEffectiveReach(
-      channel.claimedAudience,
-      channel.platform,
-      channel.verificationTier,
-      factors,
+    const policy = await this.rateConfig.getReachPolicy();
+    const effectiveReach = channelEffectiveReach(
+      {
+        platform: channel.platform,
+        claimedAudience: channel.claimedAudience,
+        isGroup: channel.isGroup,
+        activeParticipants: channel.activeParticipants,
+        verificationTier: channel.verificationTier,
+        verifiedAt: channel.verifiedAt,
+      },
+      policy,
+      new Date(),
     );
 
     await this.prisma.channel.update({ where: { id: channelId }, data: { effectiveReach } });

@@ -1,7 +1,7 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { CampaignObjective, Platform, Prisma, RateConfig, VerificationTier } from '@prisma/client';
 import { PricingConfig, SettlementConfig } from '../pricing/pricing';
-import { ReachFactors } from '../reach/effective-reach';
+import { ReachFactors, ReachPolicy } from '../reach/effective-reach';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** A Decimal(4,2) → integer hundredths, exactly (1.25 → 125). */
@@ -52,6 +52,16 @@ export class RateConfigService {
         [VerificationTier.SCREENSHOT]: n(c.factorTierScreenshot),
         [VerificationTier.INSIGHTS]: n(c.factorTierInsights),
       },
+    };
+  }
+
+  /** §1 reach policy: the factors plus the self-reported cap and proof validity window. */
+  async getReachPolicy(): Promise<ReachPolicy> {
+    const c = await this.getActive();
+    return {
+      factors: await this.getReachFactors(),
+      unverifiedReachCap: c.unverifiedReachCap,
+      proofValidityDays: c.proofValidityDays,
     };
   }
 

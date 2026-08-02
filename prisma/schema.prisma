@@ -316,6 +316,9 @@ model Channel {
   groupMembers      Int?             @map("group_members")
   activeParticipants Int?            @map("active_participants")
   verificationTier  VerificationTier @default(SELF) @map("verification_tier")
+  // When the current screenshot/insights proof was accepted; null while SELF.
+  // Reach decays back toward self-reported once this ages past the validity window (§1).
+  verifiedAt        DateTime?        @map("verified_at")
   evidenceFileId    String?          @map("evidence_file_id") @db.Uuid
   // Computed server-side from §5.1. Never accepted from the client.
   effectiveReach    Int              @default(0) @map("effective_reach")
@@ -823,6 +826,9 @@ model RateConfig {
   takeRate            Decimal @default(0.30) @map("take_rate") @db.Decimal(4, 2)
   // τ — a delivery below this share of promised reach is rejected, not paid (§2).
   deliveryThresholdPct Int    @default(70) @map("delivery_threshold_pct")
+  // §1 reach policy: the self-reported cap and the proof validity window.
+  unverifiedReachCap   Int    @default(2000) @map("unverified_reach_cap")
+  proofValidityDays    Int    @default(90) @map("proof_validity_days")
 
   // §5.1 effective reach — platform factors
   factorWhatsappStatus Decimal @default(0.30) @map("factor_whatsapp_status") @db.Decimal(4, 2)
