@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ReconciliationStatus, VerificationTier } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsPositive, IsString, MaxLength, Min, MinLength } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsPositive, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { MoneyDto } from '../../ledger/money';
 
 /** Rejecting anything requires a reason (§6). */
@@ -180,4 +180,39 @@ export class SettleGatewayPaymentDto {
   @IsInt()
   @IsPositive()
   settled_minor!: number;
+}
+
+/** Editable platform knobs (§ ALGORITHMS). All optional — only sent fields change. */
+export class RateConfigUpdateDto {
+  @ApiPropertyOptional({ example: 3000, description: 'RPM — kobo per 1,000 effective views.' })
+  @IsOptional() @IsInt() @Min(0)
+  rpm_minor?: number;
+
+  @ApiPropertyOptional({ example: 30, description: 'Ralia take rate, whole percent.' })
+  @IsOptional() @IsInt() @Min(0) @Max(90)
+  take_rate_pct?: number;
+
+  @ApiPropertyOptional({ example: 70, description: 'Delivery threshold τ, whole percent of promised.' })
+  @IsOptional() @IsInt() @Min(1) @Max(100)
+  delivery_threshold_pct?: number;
+
+  @ApiPropertyOptional({ example: 2000, description: 'Self-reported effective-reach cap.' })
+  @IsOptional() @IsInt() @Min(0)
+  unverified_reach_cap?: number;
+
+  @ApiPropertyOptional({ example: 90, description: 'Proof validity window, days.' })
+  @IsOptional() @IsInt() @Min(1)
+  proof_validity_days?: number;
+
+  @ApiPropertyOptional({ example: 30, description: 'Minimum trust score to be matched.' })
+  @IsOptional() @IsInt() @Min(0) @Max(100)
+  min_trust_score?: number;
+
+  @ApiPropertyOptional({ example: 24, description: 'Offer accept window, hours.' })
+  @IsOptional() @IsInt() @Min(1)
+  offer_expiry_hours?: number;
+
+  @ApiPropertyOptional({ example: 500000, description: 'Minimum withdrawal, kobo.' })
+  @IsOptional() @IsInt() @Min(0)
+  withdrawal_minimum_minor?: number;
 }

@@ -2208,6 +2208,299 @@
         ]
       }
     },
+    "/v1/admin/clients": {
+      "get": {
+        "description": "Client orgs with campaigns created and amount spent.",
+        "operationId": "AdminController_clients",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "All clients",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/clients/{id}/deactivate": {
+      "post": {
+        "description": "Suspends the client org.",
+        "operationId": "AdminController_deactivateClient",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Deactivate a client",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/clients/{id}/reactivate": {
+      "post": {
+        "operationId": "AdminController_reactivateClient",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Reactivate a client",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/rate-config": {
+      "get": {
+        "description": "The tunable coefficients. Changing them never reprices a quoted campaign.",
+        "operationId": "AdminController_rateConfig",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Platform rules",
+        "tags": [
+          "admin"
+        ]
+      },
+      "patch": {
+        "description": "Only the fields sent change. Audited.",
+        "operationId": "AdminController_updateRateConfig",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RateConfigUpdateDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Update platform rules",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/audit-log": {
+      "get": {
+        "description": "Recent money- and score-affecting writes, attributed to the admin.",
+        "operationId": "AdminController_auditLog",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Audit log",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/team": {
+      "get": {
+        "description": "Admins and their capabilities.",
+        "operationId": "AdminController_team",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Admin team",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/analytics": {
+      "get": {
+        "description": "GMV, revenue, active counts and status breakdowns.",
+        "operationId": "AdminController_analytics",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Platform analytics",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/dashboard/summary": {
       "get": {
         "description": "Top-line spend, views and promoter counts, plus a per-campaign rollup for the table.",
@@ -4191,6 +4484,51 @@
           "settlement_ref",
           "settled_minor"
         ]
+      },
+      "RateConfigUpdateDto": {
+        "type": "object",
+        "properties": {
+          "rpm_minor": {
+            "type": "number",
+            "example": 3000,
+            "description": "RPM — kobo per 1,000 effective views."
+          },
+          "take_rate_pct": {
+            "type": "number",
+            "example": 30,
+            "description": "Ralia take rate, whole percent."
+          },
+          "delivery_threshold_pct": {
+            "type": "number",
+            "example": 70,
+            "description": "Delivery threshold τ, whole percent of promised."
+          },
+          "unverified_reach_cap": {
+            "type": "number",
+            "example": 2000,
+            "description": "Self-reported effective-reach cap."
+          },
+          "proof_validity_days": {
+            "type": "number",
+            "example": 90,
+            "description": "Proof validity window, days."
+          },
+          "min_trust_score": {
+            "type": "number",
+            "example": 30,
+            "description": "Minimum trust score to be matched."
+          },
+          "offer_expiry_hours": {
+            "type": "number",
+            "example": 24,
+            "description": "Offer accept window, hours."
+          },
+          "withdrawal_minimum_minor": {
+            "type": "number",
+            "example": 500000,
+            "description": "Minimum withdrawal, kobo."
+          }
+        }
       },
       "DashboardCampaignRowDto": {
         "type": "object",

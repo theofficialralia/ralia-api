@@ -4,9 +4,12 @@ import {
   AssignmentStatus,
   CampaignStatus,
   ChannelStatus,
+  ClientOrgStatus,
   EntryDirection,
+  Prisma,
   PromoterStatus,
   ReconciliationStatus,
+  Role,
   VerificationTier,
   Verdict,
   WithdrawalStatus,
@@ -19,7 +22,7 @@ import { RateConfigService } from '../../common/rate-config/rate-config.service'
 import { LedgerService } from '../ledger/ledger.service';
 import { toMoney } from '../ledger/money';
 import { AuditService } from './audit.service';
-import { AdminDecisionDto, GatewayPaymentDto, ReconciliationReportDto } from './dto/admin.dto';
+import { AdminDecisionDto, GatewayPaymentDto, RateConfigUpdateDto, ReconciliationReportDto } from './dto/admin.dto';
 
 /**
  * Admin decisions. Everything here writes an audit row in the same transaction
@@ -860,4 +863,166 @@ export class AdminService {
 
     return { id, status: ReconciliationStatus.MISMATCH, message: 'Flagged for finance.' };
   }
+
+  // ── Clients ──────────────────────────────────────────────
+
+  async clients() {
+    const orgs = await this.prisma.clientOrg.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: { owner: { select: { email: true } }, _count: { select: { campaigns: true } } },
+    });
+    const spent = await this.prisma.campaign.groupBy({
+      by: ['clientOrgId'],
+      where: { status: { in: FUNDED_STATUSES }, priceMinor: { not: null } },
+      _sum: { priceMinor: true },
+    });
+    const spentByOrg = new Map(spent.map((s) => [s.clientOrgId, s._sum.priceMinor ?? 0n]));
+    return orgs.map((o) => ({
+      org_id: o.id,
+      name: o.name,
+      email: o.owner.email,
+      industry: o.industry,
+      status: o.status,
+      campaigns_created: o._count.campaigns,
+      spent: toMoney(spentByOrg.get(o.id) ?? 0n),
+      created_at: o.createdAt.toISOString(),
+    }));
+  }
+
+  async setClientStatus(adminId: string, orgId: string, status: ClientOrgStatus): Promise<AdminDecisionDto> {
+    const org = await this.prisma.clientOrg.findUnique({ where: { id: orgId } });
+    if (!org) throw new NotFoundException('No such client.');
+    await this.prisma.$transaction(async (tx) => {
+      await tx.clientOrg.update({ where: { id: orgId }, data: { status } });
+      await this.audit.record(
+        {
+          actorId: adminId,
+          action: status === ClientOrgStatus.SUSPENDED ? 'client.deactivate' : 'client.reactivate',
+          entityType: 'client_org',
+          entityId: orgId,
+          before: { status: org.status },
+          after: { status },
+        },
+        tx,
+      );
+    });
+    return { id: orgId, status, message: status === ClientOrgStatus.SUSPENDED ? 'Client deactivated.' : 'Client reactivated.' };
+  }
+
+  // ── Settings: platform rules, audit log, team ────────────
+
+  async platformRules() {
+    const c = await this.rateConfig.getActive();
+    return {
+      rpm_minor: c.rpmMinor,
+      take_rate_pct: Math.round(c.takeRate.toNumber() * 100),
+      delivery_threshold_pct: c.deliveryThresholdPct,
+      unverified_reach_cap: c.unverifiedReachCap,
+      proof_validity_days: c.proofValidityDays,
+      min_trust_score: c.minTrustScore,
+      offer_expiry_hours: c.offerExpiryHours,
+      withdrawal_minimum_minor: Number(c.withdrawalMinimumMinor),
+    };
+  }
+
+  async updateRateConfig(adminId: string, dto: RateConfigUpdateDto) {
+    const c = await this.rateConfig.getActive();
+    const data: Prisma.RateConfigUpdateInput = {};
+    if (dto.rpm_minor !== undefined) data.rpmMinor = dto.rpm_minor;
+    if (dto.take_rate_pct !== undefined) data.takeRate = new Prisma.Decimal(dto.take_rate_pct / 100);
+    if (dto.delivery_threshold_pct !== undefined) data.deliveryThresholdPct = dto.delivery_threshold_pct;
+    if (dto.unverified_reach_cap !== undefined) data.unverifiedReachCap = dto.unverified_reach_cap;
+    if (dto.proof_validity_days !== undefined) data.proofValidityDays = dto.proof_validity_days;
+    if (dto.min_trust_score !== undefined) data.minTrustScore = dto.min_trust_score;
+    if (dto.offer_expiry_hours !== undefined) data.offerExpiryHours = dto.offer_expiry_hours;
+    if (dto.withdrawal_minimum_minor !== undefined) data.withdrawalMinimumMinor = BigInt(dto.withdrawal_minimum_minor);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.rateConfig.update({ where: { id: c.id }, data });
+      await this.audit.record(
+        { actorId: adminId, action: 'rate_config.update', entityType: 'rate_config', entityId: c.id, after: dto },
+        tx,
+      );
+    });
+    return this.platformRules();
+  }
+
+  async auditLog(limit = 50) {
+    const rows = await this.prisma.auditLog.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(limit, 200),
+      include: { actor: { select: { email: true } } },
+    });
+    return rows.map((a) => ({
+      id: a.id,
+      actor: a.actor?.email ?? 'system',
+      action: a.action,
+      entity_type: a.entityType,
+      entity_id: a.entityId,
+      reason: a.reason,
+      created_at: a.createdAt.toISOString(),
+    }));
+  }
+
+  async team() {
+    const admins = await this.prisma.user.findMany({
+      where: { roles: { some: { role: Role.ADMIN } } },
+      include: { roles: { where: { role: Role.ADMIN }, select: { capabilities: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return admins.map((u) => ({
+      id: u.id,
+      email: u.email,
+      status: u.status,
+      capabilities: [...new Set(u.roles.flatMap((r) => r.capabilities))],
+    }));
+  }
+
+  // ── Analytics: platform overview ─────────────────────────
+
+  async analytics() {
+    const [gmv, liveCampaigns, activePromoters, activeClients, promotersByStatus, campaignsByStatus, config] = await Promise.all([
+      this.prisma.campaign.aggregate({ where: { status: { in: FUNDED_STATUSES }, priceMinor: { not: null } }, _sum: { priceMinor: true } }),
+      this.prisma.campaign.count({ where: { status: { in: [CampaignStatus.LIVE, CampaignStatus.PAUSED] } } }),
+      this.prisma.promoterProfile.count({ where: { status: PromoterStatus.ACTIVE } }),
+      this.prisma.clientOrg.count({ where: { status: ClientOrgStatus.ACTIVE } }),
+      this.prisma.promoterProfile.groupBy({ by: ['status'], _count: { _all: true } }),
+      this.prisma.campaign.groupBy({ by: ['status'], _count: { _all: true } }),
+      this.rateConfig.getActive(),
+    ]);
+
+    // Ralia revenue is the balance of the platform revenue account.
+    const revenueAcc = await this.prisma.account.findFirst({ where: { kind: AccountKind.RALIA_REVENUE, ownerId: null } });
+    let revenue = 0n;
+    if (revenueAcc) {
+      const g = await this.prisma.ledgerEntry.groupBy({ by: ['direction'], where: { accountId: revenueAcc.id }, _sum: { amountMinor: true } });
+      let cr = 0n;
+      let dr = 0n;
+      for (const x of g) {
+        if (x.direction === EntryDirection.CREDIT) cr = x._sum.amountMinor ?? 0n;
+        else dr = x._sum.amountMinor ?? 0n;
+      }
+      revenue = cr - dr;
+    }
+
+    return {
+      gmv: toMoney(gmv._sum.priceMinor ?? 0n),
+      revenue: toMoney(revenue),
+      take_rate_pct: Math.round(config.takeRate.toNumber() * 100),
+      live_campaigns: liveCampaigns,
+      active_promoters: activePromoters,
+      active_clients: activeClients,
+      promoters_by_status: promotersByStatus.map((r) => ({ status: r.status, count: r._count._all })),
+      campaigns_by_status: campaignsByStatus.map((r) => ({ status: r.status, count: r._count._all })),
+    };
+  }
 }
+
+/** Campaign states whose quoted price counts as client spend / GMV. */
+const FUNDED_STATUSES: CampaignStatus[] = [
+  CampaignStatus.LIVE,
+  CampaignStatus.PAUSED,
+  CampaignStatus.ENDED,
+  CampaignStatus.FULFILLED,
+  CampaignStatus.SETTLED,
+];

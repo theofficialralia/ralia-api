@@ -1,12 +1,12 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post } from '@nestjs/common';
-import { AdminCapability, Role } from '@prisma/client';
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { AdminCapability, ClientOrgStatus, Role } from '@prisma/client';
 import { ApiBearerAuth, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { AuthedUser } from '../../common/auth/jwt-auth.guard';
 import { RequiresCapability, Roles } from '../../common/auth/roles.guard';
 import { RequiresIdempotencyKey } from '../../common/idempotency/idempotency.guard';
 import { AdminService } from './admin.service';
-import { AdminDecisionDto, ApproveSubmissionDto, FundCampaignDto, ReconciliationReportDto, RecordWithdrawalPaidDto, RejectDto, SettleGatewayPaymentDto, VerifyChannelDto } from './dto/admin.dto';
+import { AdminDecisionDto, ApproveSubmissionDto, FundCampaignDto, RateConfigUpdateDto, ReconciliationReportDto, RecordWithdrawalPaidDto, RejectDto, SettleGatewayPaymentDto, VerifyChannelDto } from './dto/admin.dto';
 
 /**
  * Admin console API.
@@ -265,5 +265,71 @@ export class AdminController {
     @Body() dto: RejectDto,
   ): Promise<AdminDecisionDto> {
     return this.admin.flagGatewayPayment(admin.id, id, dto.reason);
+  }
+
+  // ── Clients ──────────────────────────────────────────────
+
+  @Get('clients')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'All clients', description: 'Client orgs with campaigns created and amount spent.' })
+  clients() {
+    return this.admin.clients();
+  }
+
+  @Post('clients/:id/deactivate')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Deactivate a client', description: 'Suspends the client org.' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  deactivateClient(@CurrentUser() admin: AuthedUser, @Param('id', ParseUUIDPipe) id: string): Promise<AdminDecisionDto> {
+    return this.admin.setClientStatus(admin.id, id, ClientOrgStatus.SUSPENDED);
+  }
+
+  @Post('clients/:id/reactivate')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Reactivate a client' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  reactivateClient(@CurrentUser() admin: AuthedUser, @Param('id', ParseUUIDPipe) id: string): Promise<AdminDecisionDto> {
+    return this.admin.setClientStatus(admin.id, id, ClientOrgStatus.ACTIVE);
+  }
+
+  // ── Settings ─────────────────────────────────────────────
+
+  @Get('rate-config')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Platform rules', description: 'The tunable coefficients. Changing them never reprices a quoted campaign.' })
+  rateConfig() {
+    return this.admin.platformRules();
+  }
+
+  @Patch('rate-config')
+  @RequiresCapability(AdminCapability.RECORD_MONEY)
+  @ApiOperation({ summary: 'Update platform rules', description: 'Only the fields sent change. Audited.' })
+  updateRateConfig(@CurrentUser() admin: AuthedUser, @Body() dto: RateConfigUpdateDto) {
+    return this.admin.updateRateConfig(admin.id, dto);
+  }
+
+  @Get('audit-log')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Audit log', description: 'Recent money- and score-affecting writes, attributed to the admin.' })
+  auditLog() {
+    return this.admin.auditLog();
+  }
+
+  @Get('team')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Admin team', description: 'Admins and their capabilities.' })
+  team() {
+    return this.admin.team();
+  }
+
+  // ── Analytics ────────────────────────────────────────────
+
+  @Get('analytics')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Platform analytics', description: 'GMV, revenue, active counts and status breakdowns.' })
+  analytics() {
+    return this.admin.analytics();
   }
 }

@@ -627,4 +627,35 @@ describe('admin — decisions, money and audit', () => {
     expect(res.body.price.amount_minor).toBe(Number(UNIT_PRICE) * 2);
     expect(res.body.objective).toBe('AWARENESS');
   });
+
+  // ── Console reads: clients, settings, analytics ──────────
+
+  it('lists clients with their campaign count', async () => {
+    const adminId = await makeAdmin();
+    await makeApprovedCampaign(1);
+    const res = await http().get('/admin/clients').set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect(res.body.length).toBeGreaterThanOrEqual(1);
+    expect(res.body[0].campaigns_created).toBeGreaterThanOrEqual(1);
+    expect(res.body[0]).toHaveProperty('spent');
+  });
+
+  it('reads and updates platform rules, and audits the change', async () => {
+    const adminId = await makeAdmin();
+    const before = await http().get('/admin/rate-config').set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect(before.body.take_rate_pct).toBe(30);
+
+    const after = await http().patch('/admin/rate-config').set(bearer(adminId, [Role.ADMIN])).send({ take_rate_pct: 25, delivery_threshold_pct: 60 }).expect(200);
+    expect(after.body.take_rate_pct).toBe(25);
+    expect(after.body.delivery_threshold_pct).toBe(60);
+    expect(await prisma.auditLog.count({ where: { action: 'rate_config.update' } })).toBe(1);
+  });
+
+  it('returns platform analytics with status breakdowns', async () => {
+    const adminId = await makeAdmin();
+    await makeApprovedCampaign(1);
+    const res = await http().get('/admin/analytics').set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect(res.body).toHaveProperty('gmv');
+    expect(res.body).toHaveProperty('active_promoters');
+    expect(Array.isArray(res.body.campaigns_by_status)).toBe(true);
+  });
 });
