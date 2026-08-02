@@ -160,6 +160,27 @@ export function settleDelivery(
   return { meetsThreshold, deliveredGrossMinor, promoterFeeMinor, raliaTakeMinor, refundMinor };
 }
 
+/**
+ * The effective reach a slot was priced around — the inverse of {@link slotPriceMinor}.
+ * Since `slot_price = round(reach × rpm × objMult × tgtMult / 10^7)`, the reach the
+ * slot's `unitPriceMinor` was budgeted for is `price × 10^7 / (rpm × objMult × tgtMult)`.
+ * Matching uses this as the "right-sized" target for reachFit (ALGORITHMS.md §7) so a
+ * candidate is judged against what the slot actually needs, not the biggest audience.
+ */
+export function slotTargetReach(
+  unitPriceMinor: bigint,
+  objective: CampaignObjective,
+  filters: TargetingFilters,
+  config: PricingConfig,
+): number {
+  const objMult = config.objectiveMultHundredths[objective];
+  if (objMult === undefined) throw new Error(`No objective multiplier for ${objective}`);
+  const tgtMult = targetingMultHundredths(activeFilterCount(filters), config);
+  const denom = BigInt(config.rpmMinor) * BigInt(objMult) * BigInt(tgtMult);
+  if (denom === 0n) return 0;
+  return Number(divRound(unitPriceMinor * 10_000_000n, denom));
+}
+
 export function objectiveMultLabel(objective: CampaignObjective): string {
   return objective.toLowerCase();
 }

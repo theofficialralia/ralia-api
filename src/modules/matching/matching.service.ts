@@ -7,14 +7,29 @@ import {
 } from '@nestjs/common';
 import {
   AssignmentStatus,
+  CampaignObjective,
   CampaignStatus,
   OfferStatus,
   Prisma,
+  PromoterRole,
   SlotStatus,
+  VerificationTier,
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { buildEligibility } from '../../common/eligibility/eligibility';
-import { slotPriceMinor, splitFee, TargetingFilters } from '../../common/pricing/pricing';
+import { slotPriceMinor, slotTargetReach, splitFee, PricingConfig, TargetingFilters } from '../../common/pricing/pricing';
+import {
+  DEFAULT_SCORING_CONFIG,
+  PromoterRole as CapabilityRole,
+  capabilityScore,
+  capabilityTier,
+  categoryFit,
+  fatigueScore,
+  isProven,
+  matchScore,
+  newbieGateActive,
+  reachFit,
+} from '../../common/scoring/scoring';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
 import { toMoney } from '../ledger/money';
@@ -30,22 +45,27 @@ export class MatchingService {
   // ── Candidates (admin) — §5.3 stage-1 hard filter ────────
 
   /**
-   * Every promoter who passes the hard filter, ordered by effective reach.
+   * Every promoter who passes the hard filter, ranked by the performance-weighted
+   * match score (ALGORITHMS.md §7) and pruned by the supply-adaptive newbie gate.
    *
-   * Thin slice: the full filter (correctness) with a reach ordering. The stage-2
-   * ranking score (reachFit, categoryFit, reliability, fatigue) is the harden
-   * slice — it changes display order, not who is eligible.
+   * The DB where-clause (buildEligibility) is the hard filter — role/platform/geo/
+   * age/language/status/trust≥floor. On top of it each survivor gets a match score
+   * from capability, trust, reliability, right-sized reachFit, categoryFit and a
+   * fatigue penalty, and the list is ordered by that score (the "Fit %" the admin and
+   * promoter both see) rather than raw reach.
    */
   async candidates(campaignId: string): Promise<CandidateDto[]> {
     const campaign = await this.prisma.campaign.findUnique({
       where: { id: campaignId },
-      include: { targeting: true },
+      include: { targeting: true, slots: { where: { status: SlotStatus.OPEN }, take: 1 } },
     });
     if (!campaign) throw new NotFoundException('No such campaign.');
 
     const filters = toFilters(campaign.targeting);
-    const config = await this.rateConfig.getActive();
-    const { channelWhere, profileWhere } = buildEligibility(filters, config.minTrustScore);
+    const rate = await this.rateConfig.getActive();
+    const pricing = await this.rateConfig.getPricingConfig();
+    const { channelWhere, profileWhere } = buildEligibility(filters, rate.minTrustScore);
+    const ctx = this.scoringContext(campaign, filters, pricing);
 
     // Exclude promoters already assigned to or holding a live offer on this
     // campaign — the "no active assignment on this campaign" clause, plus the
@@ -56,7 +76,6 @@ export class MatchingService {
       where: {
         ...profileWhere,
         ...(engaged.length > 0 ? { userId: { notIn: engaged } } : {}),
-        // Weekly cap: assignments started in the last 7 days below the promoter's max.
       },
       include: {
         user: {
@@ -70,7 +89,7 @@ export class MatchingService {
 
     // Weekly-cap check in code — it depends on a rolling window per promoter.
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const result: CandidateDto[] = [];
+    const scored: (CandidateDto & { proven: boolean })[] = [];
     for (const p of eligible) {
       const bestChannel = p.user.channels[0];
       if (!bestChannel) continue; // safety; profileWhere already requires one
@@ -80,7 +99,17 @@ export class MatchingService {
       });
       if (weekCount >= p.maxCampaignsPerWeek) continue;
 
-      result.push({
+      const fit = this.scoreCandidate(ctx, {
+        effectiveReach: bestChannel.effectiveReach,
+        verificationTier: bestChannel.verificationTier,
+        trust: p.trustScore.toNumber(),
+        reliability: p.reliability.toNumber(),
+        weekCount,
+        maxPerWeek: p.maxCampaignsPerWeek,
+        promoterCategories: p.preferredCategories,
+      });
+
+      scored.push({
         promoter_id: p.userId,
         full_name: p.fullName,
         location_state: p.locationState,
@@ -92,11 +121,73 @@ export class MatchingService {
         },
         assignments_this_week: weekCount,
         max_campaigns_per_week: p.maxCampaignsPerWeek,
+        match_score: fit.matchScore,
+        fit_pct: Math.round(fit.matchScore * 100),
+        capability: fit.capability,
+        capability_tier: fit.tier,
+        reliability: fit.reliability,
+        proven: isProven(p.completedDeliveries, p.trustScore.toNumber(), ctx.config),
       });
     }
 
-    result.sort((a, b) => b.channel.effective_reach - a.channel.effective_reach);
-    return result;
+    // Supply-adaptive newbie gate (§7), decided per-campaign at match time: when
+    // qualified supply is abundant relative to the open slots, drop unproven
+    // promoters — but never below the point where proven supply can still fill.
+    const slotsRemaining = Math.max(campaign.slotsTotal - campaign.slotsFilled, 0);
+    let ranked = scored;
+    if (newbieGateActive(scored.length, slotsRemaining, ctx.config)) {
+      const proven = scored.filter((r) => r.proven);
+      if (proven.length >= slotsRemaining) ranked = proven;
+    }
+
+    ranked.sort((a, b) => b.match_score - a.match_score);
+    return ranked.map(({ proven: _proven, ...dto }) => dto);
+  }
+
+  // ── Scoring glue (ALGORITHMS.md §3/§7) ───────────────────
+
+  /** Per-campaign scoring context: the slot's role + budgeted reach + targeted categories. */
+  private scoringContext(
+    campaign: { objective: CampaignObjective; slots: { role: PromoterRole; unitPriceMinor: bigint }[] },
+    filters: TargetingFilters,
+    pricing: PricingConfig,
+  ) {
+    const config = DEFAULT_SCORING_CONFIG;
+    const slot = campaign.slots[0];
+    const targetReach = slot ? slotTargetReach(slot.unitPriceMinor, campaign.objective, filters, pricing) : 0;
+    const role: PromoterRole = slot?.role ?? 'DISTRIBUTOR';
+    return { role, targetReach, campaignCategories: filters.categories, config };
+  }
+
+  private scoreCandidate(
+    ctx: ReturnType<MatchingService['scoringContext']>,
+    c: {
+      effectiveReach: number;
+      verificationTier: VerificationTier;
+      trust: number;
+      reliability: number;
+      weekCount: number;
+      maxPerWeek: number;
+      promoterCategories: string[];
+    },
+  ) {
+    // Capability from the signals we actually capture today: verified reach + proof
+    // strength. Unmeasured factors default to neutral 0.5 so they neither inflate nor
+    // tank the score; richer onboarding inputs (sample ratings, equipment) replace
+    // them as they land. INFLUENCER shares the reach-driven distributor composition.
+    const capRole = capabilityRoleFor(ctx.role);
+    const reachFactor = clamp01(c.effectiveReach / ctx.config.capabilityReachReference);
+    const proof = proofFactor(c.verificationTier);
+    const capability = capabilityScore(capRole, provisionalFactors(capRole, reachFactor, proof));
+
+    const rf = reachFit(c.effectiveReach, ctx.targetReach);
+    const cf = categoryFit(c.promoterCategories, ctx.campaignCategories);
+    const fatigue = fatigueScore(c.weekCount, c.maxPerWeek);
+    const score = matchScore(
+      { capability, trust: c.trust, reliability: c.reliability, reachFit: rf, categoryFit: cf, fatigue },
+      ctx.config,
+    );
+    return { matchScore: score, capability, tier: capabilityTier(capability), reliability: c.reliability };
   }
 
   // ── Send offers (admin) ──────────────────────────────────
@@ -120,8 +211,10 @@ export class MatchingService {
     const rate = await this.rateConfig.getActive();
     const filters = toFilters(campaign.targeting);
     const { channelWhere } = buildEligibility(filters, rate.minTrustScore);
+    const ctx = this.scoringContext(campaign, filters, config);
 
     const expiresAt = new Date(Date.now() + rate.offerExpiryHours * 60 * 60 * 1000);
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const role = slot.role;
 
     const created: OfferDto[] = [];
@@ -143,6 +236,27 @@ export class MatchingService {
       const grossMinor = slotPriceMinor(channel.effectiveReach, campaign.objective, filters, config);
       const { promoterFeeMinor } = splitFee(grossMinor, config);
 
+      // Freeze the match score on the offer so the promoter sees the same "Fit %"
+      // the ranking used, even as their signals drift afterwards (§7).
+      const profile = await this.prisma.promoterProfile.findUnique({
+        where: { userId: promoterId },
+        select: { trustScore: true, reliability: true, preferredCategories: true, maxCampaignsPerWeek: true },
+      });
+      const weekCount = await this.prisma.assignment.count({
+        where: { promoterId, createdAt: { gte: weekAgo } },
+      });
+      const fit = profile
+        ? this.scoreCandidate(ctx, {
+            effectiveReach: channel.effectiveReach,
+            verificationTier: channel.verificationTier,
+            trust: profile.trustScore.toNumber(),
+            reliability: profile.reliability.toNumber(),
+            weekCount,
+            maxPerWeek: profile.maxCampaignsPerWeek,
+            promoterCategories: profile.preferredCategories,
+          })
+        : null;
+
       try {
         const offer = await this.prisma.offer.create({
           data: {
@@ -153,6 +267,7 @@ export class MatchingService {
             feeMinor: promoterFeeMinor,
             grossMinor,
             promisedReach: channel.effectiveReach,
+            score: fit ? fit.matchScore : null,
             expiresAt,
             status: OfferStatus.SENT,
           },
@@ -303,6 +418,32 @@ export class MatchingService {
   }
 }
 
+const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
+
+/** INFLUENCER shares the reach-driven distributor composition; the rest map 1:1. */
+function capabilityRoleFor(role: PromoterRole): CapabilityRole {
+  return role === PromoterRole.INFLUENCER ? 'DISTRIBUTOR' : (role as CapabilityRole);
+}
+
+/** Proof strength of the promoter's best channel, normalised 0–1 (mirrors §1's verification spine). */
+function proofFactor(tier: VerificationTier): number {
+  return tier === VerificationTier.INSIGHTS ? 1 : tier === VerificationTier.SCREENSHOT ? 0.8 : 0.5;
+}
+
+/**
+ * Provisional capability factors from measurable signals. Unmeasured factors sit at
+ * neutral 0.5 until onboarding captures them, so capability is honest about what we
+ * actually know rather than fabricated from thin data.
+ */
+function provisionalFactors(role: CapabilityRole, reachFactor: number, proof: number): Record<string, number> {
+  const N = 0.5;
+  if (role === 'DISTRIBUTOR') return { verifiedReach: reachFactor, postingFrequency: N, recentPostProof: proof };
+  if (role === 'CREATOR') {
+    return { ratedSamples: N, contentBreadth: N, equipment: N, cameraComfort: N, turnaround: N };
+  }
+  return { taskBreadth: N, deviceCoverage: N, multiStepWillingness: N, agedAccounts: N };
+}
+
 function toFilters(t: {
   states: string[]; lgas: string[]; ageMin: number | null; ageMax: number | null;
   genders: string[]; languages: string[]; categories: string[]; platforms: string[];
@@ -319,7 +460,10 @@ function toFilters(t: {
 }
 
 function toOfferDto(
-  o: { id: string; campaignId: string; role: string; feeMinor: bigint; expiresAt: Date; status: OfferStatus },
+  o: {
+    id: string; campaignId: string; role: string; feeMinor: bigint; expiresAt: Date; status: OfferStatus;
+    score?: Prisma.Decimal | null;
+  },
   campaignName: string,
 ): OfferDto {
   return {
@@ -330,6 +474,7 @@ function toOfferDto(
     fee_minor: Number(o.feeMinor),
     expires_at: o.expiresAt.toISOString(),
     status: o.status,
+    fit_pct: o.score != null ? Math.round(o.score.toNumber() * 100) : null,
   };
 }
 

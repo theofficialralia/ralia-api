@@ -290,15 +290,29 @@ describe('matching — candidates, offers, accept', () => {
     expect(candidates.map((c) => c.promoter_id)).not.toContain(p.userId);
   });
 
-  it('orders candidates by effective reach, highest first', async () => {
+  it('ranks candidates by match score with the transparency fields (v2)', async () => {
     const campaignId = await makeLiveCampaign(10, { minReach: 100, platform: Platform.INSTAGRAM });
     await makePromoter({ platform: Platform.INSTAGRAM, claimed: 5_000 });
     await makePromoter({ platform: Platform.INSTAGRAM, claimed: 50_000 });
     await makePromoter({ platform: Platform.INSTAGRAM, claimed: 20_000 });
 
     const candidates = await matching.candidates(campaignId);
-    const reaches = candidates.map((c) => c.channel.effective_reach);
-    expect(reaches).toEqual([...reaches].sort((a, b) => b - a));
+    expect(candidates.length).toBe(3);
+
+    // Ordered by the performance-weighted score, not raw reach.
+    const scores = candidates.map((c) => c.match_score);
+    expect(scores).toEqual([...scores].sort((a, b) => b - a));
+
+    // Every candidate carries the §7 transparency surface.
+    for (const c of candidates) {
+      expect(c.fit_pct).toBe(Math.round(c.match_score * 100));
+      expect(c.fit_pct).toBeGreaterThanOrEqual(0);
+      expect(c.fit_pct).toBeLessThanOrEqual(100);
+      expect(c.capability).toBeGreaterThanOrEqual(0);
+      expect(c.capability).toBeLessThanOrEqual(100);
+      expect(typeof c.capability_tier).toBe('string');
+      expect(c.reliability).toBeGreaterThanOrEqual(0);
+    }
   });
 
   // ── Send-offer rules ─────────────────────────────────────

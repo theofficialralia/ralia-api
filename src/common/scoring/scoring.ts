@@ -52,6 +52,8 @@ export type ScoringConfig = {
   provenTrust: number;
   /** Over-offer multiple of remaining slots (§8). */
   overOfferFactor: number;
+  /** Absolute reach anchor for the provisional distributor capability factor (§3). */
+  capabilityReachReference: number;
 };
 
 export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
@@ -64,6 +66,7 @@ export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
   provenMinCompleted: 1,
   provenTrust: 55,
   overOfferFactor: 1.5,
+  capabilityReachReference: 3000,
 };
 
 /** Per-role capability compositions (§3) — weights sum to 1.0, output scales to 0–100. */
@@ -261,4 +264,15 @@ export function newbieGateActive(
 export function overOfferCount(slotsRemaining: number, config: ScoringConfig = DEFAULT_SCORING_CONFIG): number {
   if (slotsRemaining <= 0) return 0;
   return Math.ceil(slotsRemaining * config.overOfferFactor);
+}
+
+/**
+ * Human-readable capability band for the 0–100 score — surfaced to promoters and
+ * admins alongside the raw number so a "do X to raise it" nudge has a label to move.
+ */
+export function capabilityTier(score: number): string {
+  if (score >= 80) return 'Elite';
+  if (score >= 60) return 'Established';
+  if (score >= 40) return 'Developing';
+  return 'Emerging';
 }

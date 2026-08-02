@@ -5,6 +5,7 @@ import {
   settleDelivery,
   SettlementConfig,
   slotPriceMinor,
+  slotTargetReach,
   splitFee,
   targetingMultHundredths,
   TargetingFilters,
@@ -204,6 +205,23 @@ describe('pricing (§5.2)', () => {
       expect(activeFilterCount({ ...NO_FILTERS, ageMin: 18 })).toBe(1);
       expect(activeFilterCount({ ...NO_FILTERS, ageMin: 18, ageMax: 45 })).toBe(1);
       expect(activeFilterCount({ ...NO_FILTERS, states: ['Lagos'], minEffectiveReach: 100 })).toBe(2);
+    });
+  });
+
+  describe('slot target reach (inverse of slot price)', () => {
+    it('recovers the reach a slot price was computed from', () => {
+      // slotPrice(2000, AWARENESS) = 6000 → slotTargetReach(6000) = 2000.
+      const price = slotPriceMinor(2000, CampaignObjective.AWARENESS, NO_FILTERS, CONFIG);
+      expect(slotTargetReach(price, CampaignObjective.AWARENESS, NO_FILTERS, CONFIG)).toBe(2000);
+    });
+
+    it('round-trips across objectives and filters', () => {
+      const filters: TargetingFilters = { ...NO_FILTERS, states: ['Lagos'], ageMin: 18, ageMax: 40 };
+      for (const reach of [500, 1000, 3450, 12000]) {
+        const price = slotPriceMinor(reach, CampaignObjective.LEAD_GEN, filters, CONFIG);
+        // Exact within rounding — the forward price rounds once, so the inverse is ±1.
+        expect(Math.abs(slotTargetReach(price, CampaignObjective.LEAD_GEN, filters, CONFIG) - reach)).toBeLessThanOrEqual(1);
+      }
     });
   });
 });

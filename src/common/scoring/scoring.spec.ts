@@ -12,6 +12,7 @@ import {
   isProven,
   newbieGateActive,
   overOfferCount,
+  capabilityTier,
   CAPABILITY_WEIGHTS,
   PromoterRole,
 } from './scoring';
@@ -285,5 +286,18 @@ describe('overOfferCount', () => {
     fc.assert(
       fc.property(fc.integer({ min: 1, max: 100_000 }), (n) => overOfferCount(n) >= n),
     );
+  });
+});
+
+describe('capabilityTier', () => {
+  it('bands the 0–100 score', () => {
+    expect(capabilityTier(0)).toBe('Emerging');
+    expect(capabilityTier(39)).toBe('Emerging');
+    expect(capabilityTier(40)).toBe('Developing');
+    expect(capabilityTier(59)).toBe('Developing');
+    expect(capabilityTier(60)).toBe('Established');
+    expect(capabilityTier(79)).toBe('Established');
+    expect(capabilityTier(80)).toBe('Elite');
+    expect(capabilityTier(100)).toBe('Elite');
   });
 });

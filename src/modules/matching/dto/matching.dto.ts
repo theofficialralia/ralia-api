@@ -42,6 +42,21 @@ export class CandidateDto {
 
   @ApiProperty()
   max_campaigns_per_week!: number;
+
+  @ApiProperty({ description: 'Performance-weighted match score, 0–1 (ALGORITHMS.md §7).' })
+  match_score!: number;
+
+  @ApiProperty({ description: 'match_score as a whole-percent "Fit %".' })
+  fit_pct!: number;
+
+  @ApiProperty({ description: 'Per-role capability, 0–100.' })
+  capability!: number;
+
+  @ApiProperty({ example: 'Established' })
+  capability_tier!: string;
+
+  @ApiProperty({ description: 'Reliability, 0–1.' })
+  reliability!: number;
 }
 
 export class OfferDto {
@@ -65,6 +80,9 @@ export class OfferDto {
 
   @ApiProperty()
   status!: string;
+
+  @ApiProperty({ nullable: true, description: 'Frozen match "Fit %" (0–100) this offer was ranked at, or null for legacy offers.' })
+  fit_pct!: number | null;
 }
 
 export class AssignmentDto {
