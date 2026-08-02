@@ -570,4 +570,48 @@ describe('admin — decisions, money and audit', () => {
     expect(res.body.mismatched).toBe(1);
     expect(await prisma.auditLog.count({ where: { action: 'gateway.flag' } })).toBe(1);
   });
+
+  // ── Channel verification (§1) ────────────────────────────
+
+  it('verifying a channel lifts the self-reported cap and stamps verified_at', async () => {
+    const adminId = await makeAdmin();
+    const promoterId = await makePromoter();
+    // A big self-reported Instagram channel: 100000 × 0.10 × 0.6 = 6000, capped to 2000.
+    const channel = await prisma.channel.create({
+      data: { promoterId, platform: Platform.INSTAGRAM, claimedAudience: 100_000, verificationTier: VerificationTier.SELF, effectiveReach: 2000, status: ChannelStatus.ACTIVE },
+    });
+
+    await http().post(`/admin/channels/${channel.id}/verify`).set(bearer(adminId, [Role.ADMIN])).send({ tier: 'SCREENSHOT' }).expect(200);
+
+    const after = await prisma.channel.findUniqueOrThrow({ where: { id: channel.id } });
+    expect(after.verificationTier).toBe(VerificationTier.SCREENSHOT);
+    expect(after.verifiedAt).not.toBeNull();
+    expect(after.effectiveReach).toBe(10_000); // 100000 × 0.10 × 1.0, uncapped
+    expect(await prisma.auditLog.count({ where: { action: 'channel.verify' } })).toBe(1);
+  });
+
+  it('refuses to "verify" at the self-reported tier', async () => {
+    const adminId = await makeAdmin();
+    const promoterId = await makePromoter();
+    const channel = await prisma.channel.create({
+      data: { promoterId, platform: Platform.INSTAGRAM, claimedAudience: 5000, verificationTier: VerificationTier.SELF, effectiveReach: 300, status: ChannelStatus.ACTIVE },
+    });
+    await http().post(`/admin/channels/${channel.id}/verify`).set(bearer(adminId, [Role.ADMIN])).send({ tier: 'SELF' }).expect(400);
+  });
+
+  it('unverifying a channel drops it to self-reported and re-caps', async () => {
+    const adminId = await makeAdmin();
+    const promoterId = await makePromoter();
+    const channel = await prisma.channel.create({
+      data: { promoterId, platform: Platform.INSTAGRAM, claimedAudience: 100_000, verificationTier: VerificationTier.INSIGHTS, verifiedAt: new Date(), effectiveReach: 11_500, status: ChannelStatus.ACTIVE },
+    });
+
+    await http().post(`/admin/channels/${channel.id}/unverify`).set(bearer(adminId, [Role.ADMIN])).send({ reason: 'Screenshot was edited' }).expect(200);
+
+    const after = await prisma.channel.findUniqueOrThrow({ where: { id: channel.id } });
+    expect(after.verificationTier).toBe(VerificationTier.SELF);
+    expect(after.verifiedAt).toBeNull();
+    expect(after.effectiveReach).toBe(2000); // recapped
+    expect(await prisma.auditLog.count({ where: { action: 'channel.unverify' } })).toBe(1);
+  });
 });

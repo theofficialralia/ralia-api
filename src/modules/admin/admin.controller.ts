@@ -6,7 +6,7 @@ import { AuthedUser } from '../../common/auth/jwt-auth.guard';
 import { RequiresCapability, Roles } from '../../common/auth/roles.guard';
 import { RequiresIdempotencyKey } from '../../common/idempotency/idempotency.guard';
 import { AdminService } from './admin.service';
-import { AdminDecisionDto, ApproveSubmissionDto, FundCampaignDto, ReconciliationReportDto, RecordWithdrawalPaidDto, RejectDto, SettleGatewayPaymentDto } from './dto/admin.dto';
+import { AdminDecisionDto, ApproveSubmissionDto, FundCampaignDto, ReconciliationReportDto, RecordWithdrawalPaidDto, RejectDto, SettleGatewayPaymentDto, VerifyChannelDto } from './dto/admin.dto';
 
 /**
  * Admin console API.
@@ -116,6 +116,37 @@ export class AdminController {
     @Headers('idempotency-key') idempotencyKey: string,
   ): Promise<AdminDecisionDto> {
     return this.admin.fundCampaign(admin.id, id, BigInt(dto.amount_minor), idempotencyKey, dto.reference);
+  }
+
+  // ── Channels ─────────────────────────────────────────────
+
+  @Post('channels/:id/verify')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({
+    summary: 'Verify a channel’s audience evidence',
+    description: 'Sets the verification tier (screenshot/insights), stamps verified_at, and recomputes effective reach — lifting the self-reported cap.',
+  })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  verifyChannel(
+    @CurrentUser() admin: AuthedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VerifyChannelDto,
+  ): Promise<AdminDecisionDto> {
+    return this.admin.verifyChannel(admin.id, id, dto.tier);
+  }
+
+  @Post('channels/:id/unverify')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Drop a channel to self-reported (reason required)', description: 'Clears verified_at and re-caps reach when a proof is bad or stale.' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  unverifyChannel(
+    @CurrentUser() admin: AuthedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectDto,
+  ): Promise<AdminDecisionDto> {
+    return this.admin.unverifyChannel(admin.id, id, dto.reason);
   }
 
   // ── Submissions ──────────────────────────────────────────

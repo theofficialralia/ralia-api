@@ -7,10 +7,12 @@ import {
   EntryDirection,
   PromoterStatus,
   ReconciliationStatus,
+  VerificationTier,
   Verdict,
   WithdrawalStatus,
 } from '@prisma/client';
 import { settleDelivery } from '../../common/pricing/pricing';
+import { channelEffectiveReach } from '../../common/reach/effective-reach';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
 import { LedgerService } from '../ledger/ledger.service';
@@ -535,6 +537,85 @@ export class AdminService {
       status: w.status,
       created_at: w.createdAt.toISOString(),
     }));
+  }
+
+  // ── Channels: verification (§1) ──────────────────────────
+
+  /**
+   * Verify a channel's audience evidence and set its tier. This lifts the
+   * self-reported cap and stamps verified_at, which starts the proof-decay clock
+   * (ALGORITHMS.md §1). Reach is recomputed in the same transaction as the tier
+   * change so the stored value can never lag the tier it was priced from.
+   */
+  async verifyChannel(adminId: string, channelId: string, tier: VerificationTier): Promise<AdminDecisionDto> {
+    if (tier === VerificationTier.SELF) {
+      throw new BadRequestException('Verify sets a proven tier; use unverify to drop a channel to self-reported.');
+    }
+    const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
+    if (!channel) throw new NotFoundException('No such channel.');
+
+    const now = new Date();
+    const policy = await this.rateConfig.getReachPolicy();
+    const effectiveReach = channelEffectiveReach(
+      { platform: channel.platform, claimedAudience: channel.claimedAudience, isGroup: channel.isGroup, activeParticipants: channel.activeParticipants, verificationTier: tier, verifiedAt: now },
+      policy,
+      now,
+    );
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.channel.update({
+        where: { id: channelId },
+        data: { verificationTier: tier, verifiedAt: now, effectiveReach },
+      });
+      await this.audit.record(
+        {
+          actorId: adminId,
+          action: 'channel.verify',
+          entityType: 'channel',
+          entityId: channelId,
+          before: { verificationTier: channel.verificationTier, effectiveReach: channel.effectiveReach },
+          after: { verificationTier: tier, effectiveReach, verifiedAt: now.toISOString() },
+        },
+        tx,
+      );
+    });
+
+    return { id: channelId, status: tier, message: `Channel verified at ${tier}.` };
+  }
+
+  /** Drop a channel back to self-reported (bad or stale proof): clears verified_at and re-caps reach. */
+  async unverifyChannel(adminId: string, channelId: string, reason: string): Promise<AdminDecisionDto> {
+    const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
+    if (!channel) throw new NotFoundException('No such channel.');
+
+    const now = new Date();
+    const policy = await this.rateConfig.getReachPolicy();
+    const effectiveReach = channelEffectiveReach(
+      { platform: channel.platform, claimedAudience: channel.claimedAudience, isGroup: channel.isGroup, activeParticipants: channel.activeParticipants, verificationTier: VerificationTier.SELF, verifiedAt: null },
+      policy,
+      now,
+    );
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.channel.update({
+        where: { id: channelId },
+        data: { verificationTier: VerificationTier.SELF, verifiedAt: null, effectiveReach },
+      });
+      await this.audit.record(
+        {
+          actorId: adminId,
+          action: 'channel.unverify',
+          entityType: 'channel',
+          entityId: channelId,
+          before: { verificationTier: channel.verificationTier, effectiveReach: channel.effectiveReach },
+          after: { verificationTier: VerificationTier.SELF, effectiveReach },
+          reason,
+        },
+        tx,
+      );
+    });
+
+    return { id: channelId, status: VerificationTier.SELF, message: 'Channel dropped to self-reported.' };
   }
 
   // ── Gateway reconciliation (§10) ─────────────────────────

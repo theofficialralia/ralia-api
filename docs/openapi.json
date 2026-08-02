@@ -1636,6 +1636,120 @@
         ]
       }
     },
+    "/v1/admin/channels/{id}/verify": {
+      "post": {
+        "description": "Sets the verification tier (screenshot/insights), stamps verified_at, and recomputes effective reach — lifting the self-reported cap.",
+        "operationId": "AdminController_verifyChannel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyChannelDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Verify a channel’s audience evidence",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/channels/{id}/unverify": {
+      "post": {
+        "description": "Clears verified_at and re-caps reach when a proof is bad or stale.",
+        "operationId": "AdminController_unverifyChannel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Drop a channel to self-reported (reason required)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/submissions/{id}/approve": {
       "post": {
         "description": "Pays the promoter pro-rata on verified_views, takes Ralia’s cut, and refunds the undelivered remainder to the client — all in one balanced transaction. A delivery below the threshold is refused (reject instead). Requires an Idempotency-Key.",
@@ -3791,6 +3905,23 @@
         },
         "required": [
           "amount_minor"
+        ]
+      },
+      "VerifyChannelDto": {
+        "type": "object",
+        "properties": {
+          "tier": {
+            "type": "string",
+            "enum": [
+              "SCREENSHOT",
+              "INSIGHTS"
+            ],
+            "example": "SCREENSHOT",
+            "description": "The tier the evidence supports. SELF is not a verification — use unverify to drop a channel back."
+          }
+        },
+        "required": [
+          "tier"
         ]
       },
       "ApproveSubmissionDto": {
