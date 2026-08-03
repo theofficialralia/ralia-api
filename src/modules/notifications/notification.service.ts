@@ -101,4 +101,64 @@ export class NotificationService {
     if (sent > 0 || failed > 0) this.logger.log(`Dispatched notifications: ${sent} sent, ${failed} failed.`);
     return { sent, failed };
   }
+
+  // ── In-app read model (N-3) ──────────────────────────────
+
+  /** A user's notifications, newest first, plus their unread count. */
+  async list(userId: string, limit = 30): Promise<{ items: NotificationView[]; unread: number }> {
+    const [rows, unread] = await Promise.all([
+      this.prisma.notification.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: Math.min(Math.max(limit, 1), 100),
+      }),
+      this.prisma.notification.count({ where: { userId, readAt: null } }),
+    ]);
+    return { items: rows.map(toView), unread };
+  }
+
+  async unreadCount(userId: string): Promise<number> {
+    return this.prisma.notification.count({ where: { userId, readAt: null } });
+  }
+
+  /** Mark one notification read — scoped to the owner so no one can touch another's. */
+  async markRead(userId: string, id: string, now: Date): Promise<void> {
+    await this.prisma.notification.updateMany({
+      where: { id, userId, readAt: null },
+      data: { readAt: now },
+    });
+  }
+
+  /** Mark all of a user's unread notifications read; returns how many changed. */
+  async markAllRead(userId: string, now: Date): Promise<number> {
+    const { count } = await this.prisma.notification.updateMany({
+      where: { userId, readAt: null },
+      data: { readAt: now },
+    });
+    return count;
+  }
+}
+
+export type NotificationView = {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  data: Record<string, unknown> | null;
+  read: boolean;
+  created_at: string;
+};
+
+function toView(n: {
+  id: string; type: string; title: string; body: string; data: Prisma.JsonValue; readAt: Date | null; createdAt: Date;
+}): NotificationView {
+  return {
+    id: n.id,
+    type: n.type,
+    title: n.title,
+    body: n.body,
+    data: (n.data as Record<string, unknown> | null) ?? null,
+    read: n.readAt !== null,
+    created_at: n.createdAt.toISOString(),
+  };
 }

@@ -130,4 +130,45 @@ describe('NotificationService (N-1)', () => {
     expect(after.sent).toBe(1);
     expect((await prisma.notification.findFirstOrThrow({ where: { userId } })).emailStatus).toBe(NotificationEmailStatus.SENT);
   });
+
+  describe('read model', () => {
+    it('lists newest-first with the unread count', async () => {
+      const userId = await makeUser();
+      await service.create({ userId, type: 'a', title: 'First', body: '1' });
+      await service.create({ userId, type: 'b', title: 'Second', body: '2' });
+
+      const { items, unread } = await service.list(userId);
+      expect(items.map((i) => i.title)).toEqual(['Second', 'First']); // desc by createdAt
+      expect(unread).toBe(2);
+      expect(items[0]?.read).toBe(false);
+    });
+
+    it('markRead clears one and is scoped to the owner', async () => {
+      const a = await makeUser();
+      const b = await makeUser();
+      await service.create({ userId: a, type: 'x', title: 'A-note', body: '.' });
+      await service.create({ userId: b, type: 'x', title: 'B-note', body: '.' });
+      const aNote = await prisma.notification.findFirstOrThrow({ where: { userId: a } });
+      const bNote = await prisma.notification.findFirstOrThrow({ where: { userId: b } });
+
+      // A tries to mark B's notification — the userId scope means nothing changes.
+      await service.markRead(a, bNote.id, new Date());
+      expect((await prisma.notification.findUniqueOrThrow({ where: { id: bNote.id } })).readAt).toBeNull();
+
+      await service.markRead(a, aNote.id, new Date());
+      expect((await prisma.notification.findUniqueOrThrow({ where: { id: aNote.id } })).readAt).not.toBeNull();
+      expect(await service.unreadCount(a)).toBe(0);
+      expect(await service.unreadCount(b)).toBe(1);
+    });
+
+    it('markAllRead clears every unread one and reports the count', async () => {
+      const userId = await makeUser();
+      await service.create({ userId, type: 'a', title: '1', body: '.' });
+      await service.create({ userId, type: 'b', title: '2', body: '.' });
+
+      expect(await service.markAllRead(userId, new Date())).toBe(2);
+      expect(await service.unreadCount(userId)).toBe(0);
+      expect(await service.markAllRead(userId, new Date())).toBe(0); // idempotent
+    });
+  });
 });
