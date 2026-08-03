@@ -274,6 +274,19 @@ describe('matching — candidates, offers, accept', () => {
     expect(after.map((c) => c.promoter_id)).toEqual([b.userId]);
   });
 
+  it('a declined promoter stays out of the pool (one offer per campaign, lifetime)', async () => {
+    const campaignId = await makeLiveCampaign(10, { minReach: 500 });
+    const p = await makePromoter();
+
+    const offerId = await sendOffer(campaignId, p.userId);
+    await matching.decline(offerId, p.userId);
+
+    // Despite being neither SENT nor ACCEPTED, they can't be re-offered (unique
+    // constraint), so candidates() must not surface them again.
+    const after = await matching.candidates(campaignId);
+    expect(after.map((c) => c.promoter_id)).not.toContain(p.userId);
+  });
+
   it('excludes a promoter at their weekly cap', async () => {
     const p = await makePromoter();
     await prisma.promoterProfile.update({ where: { userId: p.userId }, data: { maxCampaignsPerWeek: 1 } });

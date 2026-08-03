@@ -67,9 +67,9 @@ export class MatchingService {
     const { channelWhere, profileWhere } = buildEligibility(filters, rate.minTrustScore);
     const ctx = this.scoringContext(campaign, filters, pricing);
 
-    // Exclude promoters already assigned to or holding a live offer on this
-    // campaign — the "no active assignment on this campaign" clause, plus the
-    // no-double-offer rule the unique constraint also guards.
+    // Exclude anyone already offered this campaign (any status) — the unique
+    // constraint permits only one offer per promoter per campaign, so these can't
+    // be offered again and must not appear as selectable candidates.
     const engaged = await this.engagedPromoterIds(campaignId);
 
     const eligible = await this.prisma.promoterProfile.findMany({
@@ -417,12 +417,18 @@ export class MatchingService {
 
   // ── Helpers ──────────────────────────────────────────────
 
+  /**
+   * Promoters who cannot be offered THIS campaign again. The @@unique(campaignId,
+   * promoterId) constraint allows exactly one offer per promoter per campaign for its
+   * lifetime, so anyone with an existing offer — of ANY status, including DECLINED and
+   * EXPIRED — is out of the candidate pool. (Filtering only SENT/ACCEPTED here would let
+   * candidates() surface promoters sendOffers() then silently P2002-skips.) Re-offering
+   * an expired/declined promoter is a future feature that must reactivate the existing
+   * offer row, not create a second one.
+   */
   private async engagedPromoterIds(campaignId: string): Promise<string[]> {
     const rows = await this.prisma.offer.findMany({
-      where: {
-        campaignId,
-        status: { in: [OfferStatus.SENT, OfferStatus.ACCEPTED] },
-      },
+      where: { campaignId },
       select: { promoterId: true },
     });
     return rows.map((r) => r.promoterId);
