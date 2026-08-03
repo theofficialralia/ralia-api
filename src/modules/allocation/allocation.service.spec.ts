@@ -188,6 +188,33 @@ describe('AllocationService — sweeps (§8)', () => {
     expect(result.sent).toBe(0);
   });
 
+  it('allocateAll fills open slots across every LIVE campaign', async () => {
+    const c1 = await makeLiveCampaign(2);
+    const c2 = await makeLiveCampaign(1);
+    await setApproved(c1, new Date(Date.now() - 48 * 60 * 60 * 1000)); // open phase
+    await setApproved(c2, new Date(Date.now() - 48 * 60 * 60 * 1000));
+    for (let i = 0; i < 6; i++) await makePromoter();
+
+    const summary = await allocation.allocateAll(new Date());
+    expect(summary.campaigns).toBe(2);
+    // c1 open target ceil(1.5×2)=3, c2 target ceil(1.5×1)=2 → 5 offers, supply permitting.
+    expect(summary.offersSent).toBe(5);
+    expect(await prisma.offer.count({ where: { campaignId: c1, status: OfferStatus.SENT } })).toBe(3);
+    expect(await prisma.offer.count({ where: { campaignId: c2, status: OfferStatus.SENT } })).toBe(2);
+  });
+
+  it('allocateAll ignores non-LIVE campaigns', async () => {
+    const live = await makeLiveCampaign(1);
+    const draft = await makeLiveCampaign(1);
+    await prisma.campaign.update({ where: { id: draft }, data: { status: CampaignStatus.DRAFT } });
+    await setApproved(live, new Date(Date.now() - 48 * 60 * 60 * 1000));
+    for (let i = 0; i < 3; i++) await makePromoter();
+
+    const summary = await allocation.allocateAll(new Date());
+    expect(summary.campaigns).toBe(1); // only the LIVE one
+    expect(await prisma.offer.count({ where: { campaignId: draft } })).toBe(0);
+  });
+
   it('expires SENT offers past their window and leaves live ones alone', async () => {
     const campaignId = await makeLiveCampaign(5);
     const stalePromoter = await makePromoter();

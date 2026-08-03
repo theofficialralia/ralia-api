@@ -14,7 +14,11 @@ export class AllocationScheduler {
 
   constructor(private readonly allocation: AllocationService) {}
 
-  /** Every minute: expire lapsed offers and reclaim blown-deadline slots. */
+  /**
+   * Every minute, in order: expire lapsed offers, reclaim blown-deadline slots back
+   * to the pool, then allocate fresh offers across all LIVE campaigns — so slots freed
+   * this tick are refilled in the same tick.
+   */
   @Interval('allocation-sweep', 60_000)
   async sweep(): Promise<void> {
     // Guard against overlap if a sweep ever runs long — intervals don't await.
@@ -24,6 +28,7 @@ export class AllocationScheduler {
       const now = new Date();
       await this.allocation.expireStaleOffers(now);
       await this.allocation.reclaimOverdueAssignments(now);
+      await this.allocation.allocateAll(now);
     } catch (err) {
       this.logger.error('Allocation sweep failed', err instanceof Error ? err.stack : String(err));
     } finally {

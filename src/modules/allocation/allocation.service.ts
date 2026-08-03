@@ -93,6 +93,28 @@ export class AllocationService {
   }
 
   /**
+   * Run an allocation pass over every LIVE campaign — the unattended entry point the
+   * scheduler calls. One campaign's failure is logged and skipped, never aborting the
+   * rest of the sweep.
+   */
+  async allocateAll(now: Date): Promise<{ campaigns: number; offersSent: number }> {
+    const live = await this.prisma.campaign.findMany({
+      where: { status: CampaignStatus.LIVE },
+      select: { id: true },
+    });
+    let offersSent = 0;
+    for (const c of live) {
+      try {
+        const { sent } = await this.allocateCampaign(c.id, now);
+        offersSent += sent;
+      } catch (err) {
+        this.logger.error(`Allocation failed for campaign ${c.id}`, err instanceof Error ? err.stack : String(err));
+      }
+    }
+    return { campaigns: live.length, offersSent };
+  }
+
+  /**
    * Mark every SENT offer past its expiry as EXPIRED. Offers reserve no slot (the
    * slot is taken at accept), so this is pure housekeeping — it just stops a lapsed
    * offer being accepted and keeps the promoter's offer list honest.
