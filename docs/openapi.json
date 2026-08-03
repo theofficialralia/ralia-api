@@ -1587,6 +1587,46 @@
         ]
       }
     },
+    "/v1/admin/campaigns/{id}/allocate": {
+      "post": {
+        "description": "Extends offers to the best-fit candidates (head-start then open free-to-air), over-offering in the open phase. Idempotent.",
+        "operationId": "AdminController_allocateCampaign",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Run one hybrid allocation pass",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/campaigns/{id}/reject": {
       "post": {
         "operationId": "AdminController_rejectCampaign",
@@ -2501,149 +2541,6 @@
         ]
       }
     },
-    "/v1/dashboard/summary": {
-      "get": {
-        "description": "Top-line spend, views and promoter counts, plus a per-campaign rollup for the table.",
-        "operationId": "AnalyticsController_summary",
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DashboardSummaryDto"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "access-token": []
-          }
-        ],
-        "summary": "Client dashboard summary",
-        "tags": [
-          "analytics"
-        ]
-      }
-    },
-    "/v1/campaigns/{id}/analytics": {
-      "get": {
-        "description": "Views delivered, offer acceptance, completion, amount spent, and every verified/pending submission with its screenshot — the four SOW metrics plus the evidence gallery (handoff §6).",
-        "operationId": "AnalyticsController_campaign",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CampaignAnalyticsDto"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "access-token": []
-          }
-        ],
-        "summary": "Campaign analytics and evidence gallery",
-        "tags": [
-          "analytics"
-        ]
-      }
-    },
-    "/v1/campaigns/{id}/payments/paystack/verify": {
-      "post": {
-        "description": "The reference is verified server-side with Paystack before any money moves. On success the campaign escrow is credited and the campaign goes LIVE. Idempotent on the Paystack reference.",
-        "operationId": "PaymentsController_verify",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": false,
-            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VerifyPaystackDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentResultDto"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "access-token": []
-          }
-        ],
-        "summary": "Confirm a Paystack payment and fund the campaign",
-        "tags": [
-          "payments"
-        ]
-      }
-    },
     "/v1/campaigns/{id}/candidates": {
       "get": {
         "operationId": "MatchingController_candidates",
@@ -2908,6 +2805,149 @@
         "summary": "My assignments",
         "tags": [
           "assignments"
+        ]
+      }
+    },
+    "/v1/dashboard/summary": {
+      "get": {
+        "description": "Top-line spend, views and promoter counts, plus a per-campaign rollup for the table.",
+        "operationId": "AnalyticsController_summary",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardSummaryDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Client dashboard summary",
+        "tags": [
+          "analytics"
+        ]
+      }
+    },
+    "/v1/campaigns/{id}/analytics": {
+      "get": {
+        "description": "Views delivered, offer acceptance, completion, amount spent, and every verified/pending submission with its screenshot — the four SOW metrics plus the evidence gallery (handoff §6).",
+        "operationId": "AnalyticsController_campaign",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignAnalyticsDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Campaign analytics and evidence gallery",
+        "tags": [
+          "analytics"
+        ]
+      }
+    },
+    "/v1/campaigns/{id}/payments/paystack/verify": {
+      "post": {
+        "description": "The reference is verified server-side with Paystack before any money moves. On success the campaign escrow is credited and the campaign goes LIVE. Idempotent on the Paystack reference.",
+        "operationId": "PaymentsController_verify",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyPaystackDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResultDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Confirm a Paystack payment and fund the campaign",
+        "tags": [
+          "payments"
         ]
       }
     },
@@ -4562,6 +4602,186 @@
           }
         }
       },
+      "CandidateChannelDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "effective_reach": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "platform",
+          "effective_reach"
+        ]
+      },
+      "CandidateDto": {
+        "type": "object",
+        "properties": {
+          "promoter_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "full_name": {
+            "type": "object",
+            "nullable": true
+          },
+          "location_state": {
+            "type": "object",
+            "nullable": true
+          },
+          "trust_score": {
+            "type": "number"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/CandidateChannelDto"
+          },
+          "assignments_this_week": {
+            "type": "number"
+          },
+          "max_campaigns_per_week": {
+            "type": "number"
+          },
+          "match_score": {
+            "type": "number",
+            "description": "Performance-weighted match score, 0–1 (ALGORITHMS.md §7)."
+          },
+          "fit_pct": {
+            "type": "number",
+            "description": "match_score as a whole-percent \"Fit %\"."
+          },
+          "capability": {
+            "type": "number",
+            "description": "Per-role capability, 0–100."
+          },
+          "capability_tier": {
+            "type": "string",
+            "example": "Established"
+          },
+          "reliability": {
+            "type": "number",
+            "description": "Reliability, 0–1."
+          }
+        },
+        "required": [
+          "promoter_id",
+          "full_name",
+          "location_state",
+          "trust_score",
+          "channel",
+          "assignments_this_week",
+          "max_campaigns_per_week",
+          "match_score",
+          "fit_pct",
+          "capability",
+          "capability_tier",
+          "reliability"
+        ]
+      },
+      "SendOffersDto": {
+        "type": "object",
+        "properties": {
+          "promoter_ids": {
+            "description": "Promoter ids from the candidates list.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "promoter_ids"
+        ]
+      },
+      "OfferDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaign_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaign_name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "fee_minor": {
+            "type": "number",
+            "example": 2415,
+            "description": "What the promoter earns, in kobo."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          },
+          "fit_pct": {
+            "type": "object",
+            "nullable": true,
+            "description": "Frozen match \"Fit %\" (0–100) this offer was ranked at, or null for legacy offers."
+          }
+        },
+        "required": [
+          "id",
+          "campaign_id",
+          "campaign_name",
+          "role",
+          "fee_minor",
+          "expires_at",
+          "status",
+          "fit_pct"
+        ]
+      },
+      "AssignmentDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "campaign_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string"
+          },
+          "fee_minor": {
+            "type": "number",
+            "example": 2415
+          },
+          "tracking_token": {
+            "type": "string",
+            "description": "The token behind this assignment’s tracking link."
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "campaign_id",
+          "role",
+          "fee_minor",
+          "tracking_token",
+          "status"
+        ]
+      },
       "DashboardCampaignRowDto": {
         "type": "object",
         "properties": {
@@ -4850,155 +5070,6 @@
         "required": [
           "status",
           "message"
-        ]
-      },
-      "CandidateChannelDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "platform": {
-            "type": "string"
-          },
-          "effective_reach": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "id",
-          "platform",
-          "effective_reach"
-        ]
-      },
-      "CandidateDto": {
-        "type": "object",
-        "properties": {
-          "promoter_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "full_name": {
-            "type": "object",
-            "nullable": true
-          },
-          "location_state": {
-            "type": "object",
-            "nullable": true
-          },
-          "trust_score": {
-            "type": "number"
-          },
-          "channel": {
-            "$ref": "#/components/schemas/CandidateChannelDto"
-          },
-          "assignments_this_week": {
-            "type": "number"
-          },
-          "max_campaigns_per_week": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "promoter_id",
-          "full_name",
-          "location_state",
-          "trust_score",
-          "channel",
-          "assignments_this_week",
-          "max_campaigns_per_week"
-        ]
-      },
-      "SendOffersDto": {
-        "type": "object",
-        "properties": {
-          "promoter_ids": {
-            "description": "Promoter ids from the candidates list.",
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        },
-        "required": [
-          "promoter_ids"
-        ]
-      },
-      "OfferDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "campaign_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "campaign_name": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string"
-          },
-          "fee_minor": {
-            "type": "number",
-            "example": 2415,
-            "description": "What the promoter earns, in kobo."
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "status": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "campaign_id",
-          "campaign_name",
-          "role",
-          "fee_minor",
-          "expires_at",
-          "status"
-        ]
-      },
-      "AssignmentDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "campaign_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "role": {
-            "type": "string"
-          },
-          "fee_minor": {
-            "type": "number",
-            "example": 2415
-          },
-          "tracking_token": {
-            "type": "string",
-            "description": "The token behind this assignment’s tracking link."
-          },
-          "status": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "campaign_id",
-          "role",
-          "fee_minor",
-          "tracking_token",
-          "status"
         ]
       },
       "SubmissionDto": {
