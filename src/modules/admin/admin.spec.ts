@@ -241,6 +241,10 @@ describe('admin — decisions, money and audit', () => {
     const paidAssignment = await prisma.assignment.findFirstOrThrow({ where: { promoterId } });
     expect(paidAssignment.deliveredOnTime).toBe(true);
     expect(paidAssignment.paidAt).not.toBeNull();
+
+    // The promoter is told they got paid — persisted in the same tx as the payout.
+    const note = await prisma.notification.findFirstOrThrow({ where: { userId: promoterId, type: 'submission.approved' } });
+    expect(note.body).toMatch(/approved/i);
   });
 
   it('partial delivery above the threshold pays pro-rata and refunds the client the remainder', async () => {

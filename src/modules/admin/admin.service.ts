@@ -21,7 +21,8 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
 import { AllocationService } from '../allocation/allocation.service';
 import { LedgerService } from '../ledger/ledger.service';
-import { toMoney } from '../ledger/money';
+import { formatNaira, toMoney } from '../ledger/money';
+import { NotificationService } from '../notifications/notification.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { AuditService } from './audit.service';
 import { AdminDecisionDto, GatewayPaymentDto, RateConfigUpdateDto, ReconciliationReportDto } from './dto/admin.dto';
@@ -45,6 +46,7 @@ export class AdminService {
     private readonly rateConfig: RateConfigService,
     private readonly scoring: ScoringService,
     private readonly allocation: AllocationService,
+    private readonly notifications: NotificationService,
     @Inject(STORAGE) private readonly storage: StorageProvider,
   ) {}
 
@@ -81,6 +83,16 @@ export class AdminService {
         where: { promoterId: userId, status: ChannelStatus.PENDING_REVIEW },
         data: { status: ChannelStatus.ACTIVE },
       });
+      await this.notifications.create(
+        {
+          userId,
+          type: 'promoter.approved',
+          title: "You're approved 🎉",
+          body: 'Your promoter profile is approved. Offers matched to your channels will start appearing in the app.',
+          data: {},
+        },
+        tx,
+      );
       await this.audit.record(
         {
           actorId: adminId,
@@ -103,6 +115,16 @@ export class AdminService {
 
     await this.prisma.$transaction(async (tx) => {
       await tx.promoterProfile.update({ where: { userId }, data: { status: PromoterStatus.REJECTED } });
+      await this.notifications.create(
+        {
+          userId,
+          type: 'promoter.rejected',
+          title: 'Profile needs changes',
+          body: `We couldn't approve your profile yet: ${reason} Update it and resubmit for review.`,
+          data: { reason },
+        },
+        tx,
+      );
       await this.audit.record(
         {
           actorId: adminId,
@@ -346,6 +368,19 @@ export class AdminService {
           now,
           tx,
         );
+        // Notify in the same tx as the payout — the promoter must never be paid
+        // without the record of why.
+        await this.notifications.create(
+          {
+            userId: assignment.promoterId,
+            type: 'submission.approved',
+            title: 'Submission approved — you got paid',
+            body: `Your proof for "${campaign.name}" was approved. ${formatNaira(settlement.promoterFeeMinor)} has been added to your balance.`,
+            data: { submissionId, campaignId: campaign.id, feeMinor: Number(settlement.promoterFeeMinor) },
+            dedupeKey: `submission.approved:${submissionId}`,
+          },
+          tx,
+        );
         await this.audit.record(
           {
             actorId: adminId,
@@ -396,6 +431,17 @@ export class AdminService {
       // A rejected submission dings trust (−6, §4). The assignment stays open, so
       // this does not touch the completed/reliability counts.
       await this.scoring.recordDeliveryOutcome(submission.assignment.promoterId, 'REJECTED', now, tx);
+      await this.notifications.create(
+        {
+          userId: submission.assignment.promoterId,
+          type: 'submission.rejected',
+          title: 'Submission needs another look',
+          body: `Your proof was rejected: ${reason} You can resubmit before the deadline.`,
+          data: { submissionId, reason },
+          dedupeKey: `submission.rejected:${submissionId}`,
+        },
+        tx,
+      );
       await this.audit.record(
         {
           actorId: adminId,
@@ -427,6 +473,17 @@ export class AdminService {
         where: { id: withdrawalId },
         data: { status: WithdrawalStatus.APPROVED, approvedBy: adminId },
       });
+      await this.notifications.create(
+        {
+          userId: withdrawal.promoterId,
+          type: 'withdrawal.approved',
+          title: 'Withdrawal approved',
+          body: `Your withdrawal of ${formatNaira(withdrawal.amountMinor)} was approved and the transfer is on its way to your bank.`,
+          data: { withdrawalId, amountMinor: Number(withdrawal.amountMinor) },
+          dedupeKey: `withdrawal.approved:${withdrawalId}`,
+        },
+        tx,
+      );
       await this.audit.record(
         {
           actorId: adminId,

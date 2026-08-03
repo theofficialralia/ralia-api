@@ -4,6 +4,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
 import { DEFAULT_SCORING_CONFIG, overOfferCount } from '../../common/scoring/scoring';
 import { MatchingService } from '../matching/matching.service';
+import { NotificationService } from '../notifications/notification.service';
 import { ScoringService } from '../scoring/scoring.service';
 
 /** Assignment states a promoter can still act on — the ones a missed deadline reclaims. */
@@ -38,6 +39,7 @@ export class AllocationService {
     private readonly scoring: ScoringService,
     private readonly matching: MatchingService,
     private readonly rateConfig: RateConfigService,
+    private readonly notifications: NotificationService,
   ) {}
 
   /**
@@ -160,6 +162,17 @@ export class AllocationService {
 
         // No-show: the steepest trust penalty (−10, §4), plus a reliability recompute.
         await this.scoring.recordDeliveryOutcome(a.promoterId, 'NO_SHOW', now, tx);
+        await this.notifications.create(
+          {
+            userId: a.promoterId,
+            type: 'assignment.reclaimed',
+            title: 'Assignment expired',
+            body: 'An assignment you accepted expired before you submitted proof, so it was returned to the pool. Missed deadlines lower your reliability — submit on time to keep it up.',
+            data: { assignmentId: a.id, campaignId: a.campaignId },
+            dedupeKey: `assignment.reclaimed:${a.id}`,
+          },
+          tx,
+        );
         return true;
       });
       if (won) reclaimed++;

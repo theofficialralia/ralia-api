@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -32,14 +33,18 @@ import {
 } from '../../common/scoring/scoring';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
-import { toMoney } from '../ledger/money';
+import { formatNaira, toMoney } from '../ledger/money';
+import { NotificationService } from '../notifications/notification.service';
 import { CandidateDto, OfferDto, AssignmentDto } from './dto/matching.dto';
 
 @Injectable()
 export class MatchingService {
+  private readonly logger = new Logger(MatchingService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly rateConfig: RateConfigService,
+    private readonly notifications: NotificationService,
   ) {}
 
   // ── Candidates (admin) — §5.3 stage-1 hard filter ────────
@@ -257,8 +262,9 @@ export class MatchingService {
           })
         : null;
 
+      let offer;
       try {
-        const offer = await this.prisma.offer.create({
+        offer = await this.prisma.offer.create({
           data: {
             campaignId,
             promoterId,
@@ -272,13 +278,27 @@ export class MatchingService {
             status: OfferStatus.SENT,
           },
         });
-        created.push(toOfferDto(offer, campaign.name));
       } catch (e) {
         // Unique (campaignId, promoterId): a promoter already offered this
         // campaign is skipped, not fatal to the batch.
         if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') continue;
         throw e;
       }
+
+      created.push(toOfferDto(offer, campaign.name));
+      // Tell the promoter — this is the signal that makes unattended allocation
+      // actually reach people. Best-effort: a notification hiccup must never fail an
+      // offer that already exists. Idempotent per offer via the dedupe key.
+      await this.notifications
+        .create({
+          userId: promoterId,
+          type: 'offer.created',
+          title: 'New offer for you',
+          body: `You've got an offer on "${campaign.name}" — you earn ${formatNaira(promoterFeeMinor)}. Open the app to accept before it expires.`,
+          data: { offerId: offer.id, campaignId, feeMinor: Number(promoterFeeMinor) },
+          dedupeKey: `offer.created:${offer.id}`,
+        })
+        .catch((err) => this.logger.warn(`offer.created notification failed: ${err instanceof Error ? err.message : err}`));
     }
 
     return created;

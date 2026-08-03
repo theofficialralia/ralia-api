@@ -111,6 +111,10 @@ describe('AllocationService — sweeps (§8)', () => {
     const profile = await prisma.promoterProfile.findUniqueOrThrow({ where: { userId: promoterId } });
     expect(profile.trustScore.toNumber()).toBe(50); // 60 − 10 (§4)
     expect(profile.reliability.toNumber()).toBeCloseTo(0, 3); // 1 CANCELLED, 0 PAID
+
+    // The promoter is told why their reliability dropped.
+    const note = await prisma.notification.findFirstOrThrow({ where: { userId: promoterId, type: 'assignment.reclaimed' } });
+    expect(note.body).toMatch(/expired/i);
   });
 
   it('spares a SUBMITTED assignment — proof is in the review queue, not a no-show', async () => {

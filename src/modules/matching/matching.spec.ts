@@ -274,6 +274,18 @@ describe('matching — candidates, offers, accept', () => {
     expect(after.map((c) => c.promoter_id)).toEqual([b.userId]);
   });
 
+  it('notifies the promoter when an offer is created', async () => {
+    const campaignId = await makeLiveCampaign(10, { minReach: 500 });
+    const p = await makePromoter();
+
+    await sendOffer(campaignId, p.userId);
+
+    const note = await prisma.notification.findFirstOrThrow({ where: { userId: p.userId } });
+    expect(note.type).toBe('offer.created');
+    expect(note.emailStatus).toBe('PENDING');
+    expect(note.body).toMatch(/offer/i);
+  });
+
   it('a declined promoter stays out of the pool (one offer per campaign, lifetime)', async () => {
     const campaignId = await makeLiveCampaign(10, { minReach: 500 });
     const p = await makePromoter();
