@@ -95,6 +95,7 @@ model User {
   approvedWithdrawals Withdrawal[]      @relation("WithdrawalApprover")
   createdTransactions LedgerTransaction[] @relation("TransactionCreator")
   uploadedFiles    File[]               @relation("FileUploader")
+  notifications    Notification[]
 
   @@index([status])
   @@map("users")
@@ -913,4 +914,42 @@ model RateConfig {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("rate_config")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Notifications
+// ─────────────────────────────────────────────────────────────
+
+enum NotificationEmailStatus {
+  PENDING // awaiting the dispatch sweep
+  SENT
+  FAILED // exhausted retries
+  SKIPPED // in-app only, never emailed
+}
+
+// A durable, per-user notification record. Created in-band (often inside the same
+// transaction as the event it announces, so it can't be lost), then emailed
+// best-effort by the dispatch sweep — decoupling delivery from the request path.
+model Notification {
+  id           String                  @id @default(uuid()) @db.Uuid
+  userId       String                  @map("user_id") @db.Uuid
+  type         String // e.g. "offer.created", "submission.approved"
+  title        String
+  body         String
+  data         Json? // structured payload (campaignId, offerId, amountMinor…)
+  emailStatus  NotificationEmailStatus @default(PENDING) @map("email_status")
+  emailAttempts Int                    @default(0) @map("email_attempts")
+  emailError   String?                 @map("email_error")
+  emailedAt    DateTime?               @map("emailed_at")
+  readAt       DateTime?               @map("read_at")
+  // Idempotency: one notification per event. A retried request or a double-wired
+  // event collides on this key and is silently skipped.
+  dedupeKey    String?                 @unique @map("dedupe_key")
+  createdAt    DateTime                @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([emailStatus])
+  @@map("notifications")
 }

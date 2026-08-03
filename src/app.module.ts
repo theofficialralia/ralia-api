@@ -10,6 +10,7 @@ import { JwtAuthGuard } from './common/auth/jwt-auth.guard';
 import { RolesGuard } from './common/auth/roles.guard';
 import { CryptoModule } from './common/crypto/crypto.module';
 import { IdempotencyGuard } from './common/idempotency/idempotency.guard';
+import { MailerModule } from './common/mailer/mailer.module';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { RateConfigModule } from './common/rate-config/rate-config.module';
 import { StorageModule } from './common/storage/storage.module';
@@ -23,6 +24,7 @@ import { EvidenceModule } from './modules/evidence/evidence.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { LedgerModule } from './modules/ledger/ledger.module';
 import { MatchingModule } from './modules/matching/matching.module';
+import { NotificationModule } from './modules/notifications/notification.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
 import { TrackingModule } from './modules/tracking/tracking.module';
@@ -70,6 +72,8 @@ import { WalletModule } from './modules/wallet/wallet.module';
     CryptoModule,
     RateConfigModule,
     StorageModule,
+    MailerModule,
+    NotificationModule,
     IdentityModule,
     ProfilesModule,
     CampaignsModule,
