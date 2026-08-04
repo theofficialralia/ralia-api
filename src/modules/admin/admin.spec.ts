@@ -166,6 +166,10 @@ describe('admin — decisions, money and audit', () => {
     await http().post(`/admin/campaigns/${campaignId}/fund`).set(bearer(adminId, [Role.ADMIN])).set(key())
       .send({ amount_minor: Number(UNIT_PRICE) }).expect(200);
 
+    // Funding takes it live and notifies the campaign owner (N-5).
+    const liveNote = await prisma.notification.findFirstOrThrow({ where: { type: 'campaign.live' } });
+    expect(liveNote.body).toMatch(/live/i);
+
     const channel = await prisma.channel.findFirstOrThrow({ where: { promoterId } });
     const slot = await prisma.campaignSlot.findFirstOrThrow({ where: { campaignId } });
     const offer = await prisma.offer.create({

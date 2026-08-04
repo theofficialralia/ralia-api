@@ -144,6 +144,15 @@ export class AdminService {
 
   // ── Campaigns ────────────────────────────────────────────
 
+  /** The client user who owns a campaign — the recipient of campaign notifications. */
+  private async campaignOwnerId(clientOrgId: string): Promise<string | null> {
+    const org = await this.prisma.clientOrg.findUnique({
+      where: { id: clientOrgId },
+      select: { ownerUserId: true },
+    });
+    return org?.ownerUserId ?? null;
+  }
+
   async approveCampaign(adminId: string, campaignId: string): Promise<AdminDecisionDto> {
     const campaign = await this.prisma.campaign.findUnique({ where: { id: campaignId } });
     if (!campaign) throw new NotFoundException('No such campaign.');
@@ -151,12 +160,26 @@ export class AdminService {
       throw new ConflictException(`A ${campaign.status} campaign is not awaiting approval.`);
     }
 
+    const ownerId = await this.campaignOwnerId(campaign.clientOrgId);
     await this.prisma.$transaction(async (tx) => {
       await tx.campaign.update({
         where: { id: campaignId },
         // Approved, now awaiting the client's transfer — funding flips it LIVE.
         data: { status: CampaignStatus.CONFIRMING_PAYMENT, approvedBy: adminId, approvedAt: new Date() },
       });
+      if (ownerId) {
+        await this.notifications.create(
+          {
+            userId: ownerId,
+            type: 'campaign.approved',
+            title: 'Campaign approved',
+            body: `"${campaign.name}" is approved. Fund it with the quoted amount to take it live and start matching promoters.`,
+            data: { campaignId },
+            dedupeKey: `campaign.approved:${campaignId}`,
+          },
+          tx,
+        );
+      }
       await this.audit.record(
         {
           actorId: adminId,
@@ -180,8 +203,22 @@ export class AdminService {
       throw new ConflictException(`A ${campaign.status} campaign is not awaiting approval.`);
     }
 
+    const ownerId = await this.campaignOwnerId(campaign.clientOrgId);
     await this.prisma.$transaction(async (tx) => {
       await tx.campaign.update({ where: { id: campaignId }, data: { status: CampaignStatus.REJECTED, rejectReason: reason } });
+      if (ownerId) {
+        await this.notifications.create(
+          {
+            userId: ownerId,
+            type: 'campaign.rejected',
+            title: 'Campaign needs changes',
+            body: `"${campaign.name}" wasn't approved: ${reason} Edit and resubmit it for review.`,
+            data: { campaignId, reason },
+            dedupeKey: `campaign.rejected:${campaignId}`,
+          },
+          tx,
+        );
+      }
       await this.audit.record(
         {
           actorId: adminId,
@@ -248,11 +285,25 @@ export class AdminService {
     });
 
     if (!replayed) {
+      const ownerId = await this.campaignOwnerId(campaign.clientOrgId);
       await this.prisma.$transaction(async (tx) => {
         await tx.campaign.update({
           where: { id: campaignId },
           data: { status: CampaignStatus.LIVE, escrowAccountId },
         });
+        if (ownerId) {
+          await this.notifications.create(
+            {
+              userId: ownerId,
+              type: 'campaign.live',
+              title: 'Campaign is live 🚀',
+              body: `"${campaign.name}" is funded and live — we're now matching it to promoters. Track delivery from your dashboard.`,
+              data: { campaignId },
+              dedupeKey: `campaign.live:${campaignId}`,
+            },
+            tx,
+          );
+        }
         await this.audit.record(
           {
             actorId: adminId,
