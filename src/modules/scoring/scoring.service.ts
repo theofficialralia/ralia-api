@@ -6,8 +6,13 @@ import {
   ScoringConfig,
   TrustEvent,
   applyTrustEvent,
+  capabilityRoleForName,
+  capabilityScore,
+  proofStrength,
   reliabilityScore,
 } from '../../common/scoring/scoring';
+
+const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
 
 /** A Prisma client or an interactive-transaction client — mirrors LedgerService. */
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
@@ -60,6 +65,44 @@ export class ScoringService {
       reliability: reliabilityScore(rollingRate, lifetimeRate, this.config),
       completedDeliveries: paid,
     };
+  }
+
+  /**
+   * Computes per-role capability (§3) from the promoter's self-reported factors plus
+   * the derived ones — verified reach and proof strength from their best active channel,
+   * and admin sample ratings (default 0.5 until an admin rates). Returned as a
+   * {role: 0–100} map for the roles the promoter offers; empty if they offer none.
+   */
+  async computeCapability(
+    promoterId: string,
+    opts: { sampleRatings?: number },
+    tx: Tx,
+  ): Promise<Record<string, number>> {
+    const profile = await tx.promoterProfile.findUnique({
+      where: { userId: promoterId },
+      select: { roles: true, capabilityInputs: true },
+    });
+    if (!profile) return {};
+
+    const bestChannel = await tx.channel.findFirst({
+      where: { promoterId },
+      orderBy: { effectiveReach: 'desc' },
+      select: { effectiveReach: true, verificationTier: true },
+    });
+
+    const selfReported = (profile.capabilityInputs as Record<string, number> | null) ?? {};
+    const derived = {
+      verifiedReach: bestChannel ? clamp01(bestChannel.effectiveReach / this.config.capabilityReachReference) : 0,
+      recentPostProof: bestChannel ? proofStrength(bestChannel.verificationTier) : 0.5,
+      ratedSamples: opts.sampleRatings ?? 0.5,
+    };
+    const factors = { ...selfReported, ...derived };
+
+    const scores: Record<string, number> = {};
+    for (const role of profile.roles) {
+      scores[role] = capabilityScore(capabilityRoleForName(role), factors, undefined);
+    }
+    return scores;
   }
 
   /**

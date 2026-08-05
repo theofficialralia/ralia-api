@@ -22,6 +22,7 @@ import { slotPriceMinor, slotTargetReach, splitFee, PricingConfig, TargetingFilt
 import {
   DEFAULT_SCORING_CONFIG,
   PromoterRole as CapabilityRole,
+  capabilityRoleForName,
   capabilityScore,
   capabilityTier,
   categoryFit,
@@ -29,6 +30,7 @@ import {
   isProven,
   matchScore,
   newbieGateActive,
+  proofStrength,
   reachFit,
 } from '../../common/scoring/scoring';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -112,6 +114,7 @@ export class MatchingService {
         weekCount,
         maxPerWeek: p.maxCampaignsPerWeek,
         promoterCategories: p.preferredCategories,
+        storedCapability: (p.capabilityScores as Record<string, number> | null)?.[ctx.role] ?? null,
       });
 
       scored.push({
@@ -174,16 +177,23 @@ export class MatchingService {
       weekCount: number;
       maxPerWeek: number;
       promoterCategories: string[];
+      /** Admin-confirmed capability for this campaign's role, if computed at review. */
+      storedCapability?: number | null;
     },
   ) {
-    // Capability from the signals we actually capture today: verified reach + proof
-    // strength. Unmeasured factors default to neutral 0.5 so they neither inflate nor
-    // tank the score; richer onboarding inputs (sample ratings, equipment) replace
-    // them as they land. INFLUENCER shares the reach-driven distributor composition.
-    const capRole = capabilityRoleFor(ctx.role);
-    const reachFactor = clamp01(c.effectiveReach / ctx.config.capabilityReachReference);
-    const proof = proofFactor(c.verificationTier);
-    const capability = capabilityScore(capRole, provisionalFactors(capRole, reachFactor, proof));
+    // Prefer the admin-confirmed capability (§3, computed at review from real inputs).
+    // Fall back to a provisional estimate from the signals we always have — verified
+    // reach + proof strength, unmeasured factors neutral — for promoters approved
+    // before capability capture existed.
+    let capability: number;
+    if (c.storedCapability != null) {
+      capability = c.storedCapability;
+    } else {
+      const capRole = capabilityRoleForName(ctx.role);
+      const reachFactor = clamp01(c.effectiveReach / ctx.config.capabilityReachReference);
+      const proof = proofStrength(c.verificationTier);
+      capability = capabilityScore(capRole, provisionalFactors(capRole, reachFactor, proof));
+    }
 
     const rf = reachFit(c.effectiveReach, ctx.targetReach);
     const cf = categoryFit(c.promoterCategories, ctx.campaignCategories);
@@ -245,7 +255,7 @@ export class MatchingService {
       // the ranking used, even as their signals drift afterwards (§7).
       const profile = await this.prisma.promoterProfile.findUnique({
         where: { userId: promoterId },
-        select: { trustScore: true, reliability: true, preferredCategories: true, maxCampaignsPerWeek: true },
+        select: { trustScore: true, reliability: true, preferredCategories: true, maxCampaignsPerWeek: true, capabilityScores: true },
       });
       const weekCount = await this.prisma.assignment.count({
         where: { promoterId, createdAt: { gte: weekAgo } },
@@ -259,6 +269,7 @@ export class MatchingService {
             weekCount,
             maxPerWeek: profile.maxCampaignsPerWeek,
             promoterCategories: profile.preferredCategories,
+            storedCapability: (profile.capabilityScores as Record<string, number> | null)?.[ctx.role] ?? null,
           })
         : null;
 
@@ -457,20 +468,10 @@ export class MatchingService {
 
 const clamp01 = (x: number): number => Math.max(0, Math.min(1, x));
 
-/** INFLUENCER shares the reach-driven distributor composition; the rest map 1:1. */
-function capabilityRoleFor(role: PromoterRole): CapabilityRole {
-  return role === PromoterRole.INFLUENCER ? 'DISTRIBUTOR' : (role as CapabilityRole);
-}
-
-/** Proof strength of the promoter's best channel, normalised 0–1 (mirrors §1's verification spine). */
-function proofFactor(tier: VerificationTier): number {
-  return tier === VerificationTier.INSIGHTS ? 1 : tier === VerificationTier.SCREENSHOT ? 0.8 : 0.5;
-}
-
 /**
- * Provisional capability factors from measurable signals. Unmeasured factors sit at
- * neutral 0.5 until onboarding captures them, so capability is honest about what we
- * actually know rather than fabricated from thin data.
+ * Provisional capability factors from measurable signals — the fallback when a
+ * promoter has no admin-confirmed capability yet. Unmeasured factors sit at neutral
+ * 0.5, so capability is honest about what we actually know rather than fabricated.
  */
 function provisionalFactors(role: CapabilityRole, reachFactor: number, proof: number): Record<string, number> {
   const N = 0.5;

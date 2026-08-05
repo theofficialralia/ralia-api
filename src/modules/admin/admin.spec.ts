@@ -302,6 +302,34 @@ describe('admin — decisions, money and audit', () => {
     return kind === AccountKind.BANK_CLEARING ? debit - credit : credit - debit;
   }
 
+  it('computes and confirms per-role capability when a promoter is approved (§3)', async () => {
+    const adminId = await makeAdmin();
+    const promoterId = await makePromoter(PromoterStatus.AWAITING_APPROVAL);
+    await prisma.promoterProfile.update({
+      where: { userId: promoterId },
+      data: { roles: { set: ['DISTRIBUTOR'] }, capabilityInputs: { postingFrequency: 1 } },
+    });
+
+    await http().post(`/admin/promoters/${promoterId}/approve`).set(bearer(adminId, [Role.ADMIN])).expect(200);
+
+    const p = await prisma.promoterProfile.findUniqueOrThrow({ where: { userId: promoterId } });
+    // reach 2000/3000=.667×.5 + postingFrequency 1×.2 + proof SCREENSHOT .8×.3 = .773 → 77.
+    expect((p.capabilityScores as Record<string, number>).DISTRIBUTOR).toBe(77);
+    expect(p.capabilityConfirmedBy).toBe(adminId);
+  });
+
+  it('lets an admin override a promoter’s capability', async () => {
+    const adminId = await makeAdmin();
+    const promoterId = await makePromoter();
+
+    await http().post(`/admin/promoters/${promoterId}/capability`).send({ scores: { DISTRIBUTOR: 90 } }).set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect((( await prisma.promoterProfile.findUniqueOrThrow({ where: { userId: promoterId } })).capabilityScores as Record<string, number>).DISTRIBUTOR).toBe(90);
+
+    // Out-of-range or unknown role is refused.
+    await http().post(`/admin/promoters/${promoterId}/capability`).send({ scores: { DISTRIBUTOR: 120 } }).set(bearer(adminId, [Role.ADMIN])).expect(400);
+    await http().post(`/admin/promoters/${promoterId}/capability`).send({ scores: { GHOST: 50 } }).set(bearer(adminId, [Role.ADMIN])).expect(400);
+  });
+
   it('writes an audit row for every money- or score-affecting decision', async () => {
     const adminId = await makeAdmin();
     const promoterId = await makePromoter(PromoterStatus.AWAITING_APPROVAL);

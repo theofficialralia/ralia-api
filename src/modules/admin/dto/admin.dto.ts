@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ReconciliationStatus, VerificationTier } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsPositive, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsIn, IsInt, IsObject, IsOptional, IsPositive, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { MoneyDto } from '../../ledger/money';
 
 /** Rejecting anything requires a reason (§6). */
@@ -12,6 +12,18 @@ export class RejectDto {
   @MaxLength(500)
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   reason!: string;
+}
+
+/** Admin override of a promoter's computed per-role capability (§3), 0–100 each. */
+export class SetCapabilityDto {
+  @ApiProperty({
+    type: 'object',
+    additionalProperties: { type: 'number' },
+    example: { DISTRIBUTOR: 78, CREATOR: 60 },
+    description: 'Per-role capability, 0–100. Merged over the computed scores.',
+  })
+  @IsObject()
+  scores!: Record<string, number>;
 }
 
 /** Verifying a channel's audience evidence sets a proven tier (§1). */

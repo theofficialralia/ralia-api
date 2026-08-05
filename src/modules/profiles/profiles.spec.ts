@@ -197,6 +197,25 @@ describe('profiles — questionnaire, channels, bank', () => {
     expect(res.body.max_campaigns_per_week).toBe(5);
   });
 
+  // ── Capability inputs (§3) ───────────────────────────────
+
+  it('stores roles and self-reported capability factors', async () => {
+    const res = await authed()
+      .put('/promoters/me/profile')
+      .set(bearer())
+      .send({ roles: ['DISTRIBUTOR', 'CREATOR'], capability_inputs: { postingFrequency: 0.7, equipment: 0.5 } })
+      .expect(200);
+
+    expect(res.body.roles).toEqual(['DISTRIBUTOR', 'CREATOR']);
+    expect(res.body.capability_inputs).toEqual({ postingFrequency: 0.7, equipment: 0.5 });
+    expect(res.body.capability_scores).toBeNull(); // computed only at admin review
+  });
+
+  it('rejects an unknown capability factor or an out-of-range value', async () => {
+    await authed().put('/promoters/me/profile').set(bearer()).send({ capability_inputs: { bogus: 0.5 } }).expect(400);
+    await authed().put('/promoters/me/profile').set(bearer()).send({ capability_inputs: { postingFrequency: 1.5 } }).expect(400);
+  });
+
   // ── Derived and protected fields ─────────────────────────
 
   it('derives age from dob and refuses a client-supplied age or trust_score', async () => {

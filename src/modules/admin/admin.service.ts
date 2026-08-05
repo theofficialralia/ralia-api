@@ -72,16 +72,26 @@ export class AdminService {
       throw new ConflictException('That promoter is already approved.');
     }
 
+    const now = new Date();
     await this.prisma.$transaction(async (tx) => {
-      await tx.promoterProfile.update({
-        where: { userId },
-        data: { status: PromoterStatus.ACTIVE, approvedBy: adminId, approvedAt: new Date() },
-      });
-      // Their channels become matchable at the same moment — an approved
-      // promoter with no live channel cannot be offered anything.
+      // Channels first, so computeCapability sees them ACTIVE for the reach factor.
       await tx.channel.updateMany({
         where: { promoterId: userId, status: ChannelStatus.PENDING_REVIEW },
         data: { status: ChannelStatus.ACTIVE },
+      });
+      // §3 capability, confirmed at the review step: compute per-role from the
+      // promoter's self-reported factors + derived reach/proof, and freeze it.
+      const capabilityScores = await this.scoring.computeCapability(userId, {}, tx);
+      await tx.promoterProfile.update({
+        where: { userId },
+        data: {
+          status: PromoterStatus.ACTIVE,
+          approvedBy: adminId,
+          approvedAt: now,
+          capabilityScores,
+          capabilityConfirmedBy: adminId,
+          capabilityConfirmedAt: now,
+        },
       });
       await this.notifications.create(
         {
@@ -107,6 +117,44 @@ export class AdminService {
     });
 
     return { id: userId, status: PromoterStatus.ACTIVE, message: 'Promoter approved.' };
+  }
+
+  /** Admin override of computed per-role capability (§3). Merges over existing scores. */
+  async setCapability(adminId: string, userId: string, scores: Record<string, number>): Promise<AdminDecisionDto> {
+    const profile = await this.prisma.promoterProfile.findUnique({ where: { userId } });
+    if (!profile) throw new NotFoundException('No promoter profile for that user.');
+
+    const valid = ['DISTRIBUTOR', 'CREATOR', 'PARTICIPATOR', 'INFLUENCER'];
+    const clean: Record<string, number> = {};
+    for (const [role, v] of Object.entries(scores)) {
+      if (!valid.includes(role)) throw new BadRequestException(`Unknown role: ${role}`);
+      if (typeof v !== 'number' || Number.isNaN(v) || v < 0 || v > 100) {
+        throw new BadRequestException(`Capability for ${role} must be a number in [0, 100].`);
+      }
+      clean[role] = Math.round(v);
+    }
+
+    const merged = { ...((profile.capabilityScores as Record<string, number> | null) ?? {}), ...clean };
+    const now = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.promoterProfile.update({
+        where: { userId },
+        data: { capabilityScores: merged, capabilityConfirmedBy: adminId, capabilityConfirmedAt: now },
+      });
+      await this.audit.record(
+        {
+          actorId: adminId,
+          action: 'promoter.capability.override',
+          entityType: 'promoter_profile',
+          entityId: userId,
+          before: { capabilityScores: profile.capabilityScores },
+          after: { capabilityScores: merged },
+        },
+        tx,
+      );
+    });
+
+    return { id: userId, status: profile.status, message: 'Capability updated.' };
   }
 
   async rejectPromoter(adminId: string, userId: string, reason: string): Promise<AdminDecisionDto> {

@@ -69,6 +69,23 @@ export const DEFAULT_SCORING_CONFIG: ScoringConfig = {
   capabilityReachReference: 3000,
 };
 
+/**
+ * The capability factors a promoter self-reports in onboarding (normalised 0–1).
+ * The remaining §3 factors — verifiedReach, recentPostProof, ratedSamples — are
+ * derived or admin-assessed at review, never client-set, so they are NOT in this list.
+ */
+export const SELF_REPORTED_CAPABILITY_FACTORS = [
+  'postingFrequency',
+  'contentBreadth',
+  'equipment',
+  'cameraComfort',
+  'turnaround',
+  'taskBreadth',
+  'deviceCoverage',
+  'multiStepWillingness',
+  'agedAccounts',
+] as const;
+
 /** Per-role capability compositions (§3) — weights sum to 1.0, output scales to 0–100. */
 export const CAPABILITY_WEIGHTS: Record<PromoterRole, Record<string, number>> = {
   DISTRIBUTOR: { verifiedReach: 0.5, postingFrequency: 0.2, recentPostProof: 0.3 },
@@ -264,6 +281,16 @@ export function newbieGateActive(
 export function overOfferCount(slotsRemaining: number, config: ScoringConfig = DEFAULT_SCORING_CONFIG): number {
   if (slotsRemaining <= 0) return 0;
   return Math.ceil(slotsRemaining * config.overOfferFactor);
+}
+
+/** Map a stored role name to its capability composition — INFLUENCER shares DISTRIBUTOR's. */
+export function capabilityRoleForName(role: string): PromoterRole {
+  return role === 'INFLUENCER' ? 'DISTRIBUTOR' : (role as PromoterRole);
+}
+
+/** Proof strength of a channel's verification tier, normalised 0–1 (mirrors §1's spine). */
+export function proofStrength(tier: string): number {
+  return tier === 'INSIGHTS' ? 1 : tier === 'SCREENSHOT' ? 0.8 : 0.5;
 }
 
 /**

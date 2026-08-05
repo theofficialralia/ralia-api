@@ -6,7 +6,7 @@ import { AuthedUser } from '../../common/auth/jwt-auth.guard';
 import { RequiresCapability, Roles } from '../../common/auth/roles.guard';
 import { RequiresIdempotencyKey } from '../../common/idempotency/idempotency.guard';
 import { AdminService } from './admin.service';
-import { AdminDecisionDto, ApproveSubmissionDto, FundCampaignDto, RateConfigUpdateDto, ReconciliationReportDto, RecordWithdrawalPaidDto, RejectDto, SettleGatewayPaymentDto, VerifyChannelDto } from './dto/admin.dto';
+import { AdminDecisionDto, ApproveSubmissionDto, FundCampaignDto, RateConfigUpdateDto, ReconciliationReportDto, RecordWithdrawalPaidDto, RejectDto, SetCapabilityDto, SettleGatewayPaymentDto, VerifyChannelDto } from './dto/admin.dto';
 
 /**
  * Admin console API.
@@ -74,6 +74,19 @@ export class AdminController {
     @Body() dto: RejectDto,
   ): Promise<AdminDecisionDto> {
     return this.admin.rejectPromoter(admin.id, id, dto.reason);
+  }
+
+  @Post('promoters/:id/capability')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Override a promoter’s per-role capability (§3)', description: 'Merges the given 0–100 scores over the computed ones and records the confirmation.' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  setCapability(
+    @CurrentUser() admin: AuthedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetCapabilityDto,
+  ): Promise<AdminDecisionDto> {
+    return this.admin.setCapability(admin.id, id, dto.scores);
   }
 
   // ── Campaigns ────────────────────────────────────────────

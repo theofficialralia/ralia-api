@@ -277,6 +277,17 @@ model PromoterProfile {
   skills            String[]
   deviceInfo        Json?    @map("device_info")
 
+  // §3 capability. `roles` are the roles the promoter offers (Distributor/Creator/
+  // Participator). `capabilityInputs` holds the self-reported normalised factors from
+  // onboarding; `capabilityScores` is the per-role 0–100 score computed and confirmed
+  // by an admin at the review step (the derived factors — verified reach, proof tier,
+  // sample ratings — are folded in at compute time, not stored here).
+  roles                 PromoterRole[] @map("roles")
+  capabilityInputs      Json?          @map("capability_inputs")
+  capabilityScores      Json?          @map("capability_scores")
+  capabilityConfirmedBy String?        @map("capability_confirmed_by") @db.Uuid
+  capabilityConfirmedAt DateTime?      @map("capability_confirmed_at")
+
   approvedBy String?   @map("approved_by") @db.Uuid
   approvedAt DateTime? @map("approved_at")
   createdAt  DateTime  @default(now()) @map("created_at")

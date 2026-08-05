@@ -1,7 +1,23 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConsentPurpose, Prisma, PromoterProfile, PromoterStatus } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { SELF_REPORTED_CAPABILITY_FACTORS } from '../../common/scoring/scoring';
 import { ProfileDto, UpdateProfileDto } from './dto/profile.dto';
+
+const ALLOWED_FACTORS: ReadonlySet<string> = new Set(SELF_REPORTED_CAPABILITY_FACTORS);
+
+/** Reject unknown factor keys / out-of-range values so a client can't inject junk or inflate itself. */
+function sanitizeCapabilityInputs(inputs: Record<string, unknown>): Record<string, number> {
+  const clean: Record<string, number> = {};
+  for (const [key, value] of Object.entries(inputs)) {
+    if (!ALLOWED_FACTORS.has(key)) throw new BadRequestException(`Unknown capability factor: ${key}`);
+    if (typeof value !== 'number' || Number.isNaN(value) || value < 0 || value > 1) {
+      throw new BadRequestException(`Capability factor ${key} must be a number in [0, 1].`);
+    }
+    clean[key] = value;
+  }
+  return clean;
+}
 
 /**
  * Fields a promoter must supply before an admin can meaningfully review them.
@@ -46,6 +62,8 @@ export class ProfileService {
     if (dto.preferred_categories !== undefined) data.preferredCategories = dto.preferred_categories;
     if (dto.max_campaigns_per_week !== undefined) data.maxCampaignsPerWeek = dto.max_campaigns_per_week;
     if (dto.gender !== undefined) data.gender = dto.gender;
+    if (dto.roles !== undefined) data.roles = { set: dto.roles };
+    if (dto.capability_inputs !== undefined) data.capabilityInputs = sanitizeCapabilityInputs(dto.capability_inputs);
 
     if (dto.dob !== undefined) {
       const dob = new Date(dto.dob);
@@ -155,6 +173,9 @@ export class ProfileService {
       preferred_categories: profile.preferredCategories,
       max_campaigns_per_week: profile.maxCampaignsPerWeek,
       trust_score: profile.trustScore.toNumber(),
+      roles: profile.roles,
+      capability_inputs: (profile.capabilityInputs as Record<string, number> | null) ?? null,
+      capability_scores: (profile.capabilityScores as Record<string, number> | null) ?? null,
       complete,
       missing,
     };

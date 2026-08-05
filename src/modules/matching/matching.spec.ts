@@ -274,6 +274,18 @@ describe('matching — candidates, offers, accept', () => {
     expect(after.map((c) => c.promoter_id)).toEqual([b.userId]);
   });
 
+  it('uses the admin-confirmed capability when present, not the provisional estimate', async () => {
+    const campaignId = await makeLiveCampaign(10, { minReach: 100, platform: Platform.INSTAGRAM });
+    const p = await makePromoter({ platform: Platform.INSTAGRAM, claimed: 20_000 });
+    await prisma.promoterProfile.update({
+      where: { userId: p.userId },
+      data: { roles: { set: ['DISTRIBUTOR'] }, capabilityScores: { DISTRIBUTOR: 95 } },
+    });
+
+    const [candidate] = await matching.candidates(campaignId);
+    expect(candidate!.capability).toBe(95); // the stored score, verbatim
+  });
+
   it('notifies the promoter when an offer is created', async () => {
     const campaignId = await makeLiveCampaign(10, { minReach: 500 });
     const p = await makePromoter();

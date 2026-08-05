@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Gender, Platform, PromoterStatus, VerificationTier } from '@prisma/client';
+import { Gender, Platform, PromoterRole, PromoterStatus, VerificationTier } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -9,6 +9,7 @@ import {
   IsDateString,
   IsEnum,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   IsUrl,
@@ -72,6 +73,18 @@ export class UpdateProfileDto {
   @Min(1)
   @Max(20)
   max_campaigns_per_week?: number;
+
+  @ApiPropertyOptional({ enum: PromoterRole, isArray: true, description: 'The roles this promoter offers.' })
+  @IsOptional()
+  @IsArray()
+  @IsEnum(PromoterRole, { each: true })
+  @ArrayMaxSize(4)
+  roles?: PromoterRole[];
+
+  @ApiPropertyOptional({ type: 'object', additionalProperties: { type: 'number' }, description: 'Self-reported capability factors, each normalised 0–1.' })
+  @IsOptional()
+  @IsObject()
+  capability_inputs?: Record<string, number>;
 }
 
 export class ProfileDto {
@@ -107,6 +120,15 @@ export class ProfileDto {
 
   @ApiProperty({ example: 50, description: 'Set by admins, not by the promoter.' })
   trust_score!: number;
+
+  @ApiProperty({ enum: PromoterRole, isArray: true, description: 'Roles this promoter offers.' })
+  roles!: PromoterRole[];
+
+  @ApiProperty({ nullable: true, type: 'object', additionalProperties: { type: 'number' }, description: 'Self-reported capability factors (0–1).' })
+  capability_inputs!: Record<string, number> | null;
+
+  @ApiProperty({ nullable: true, type: 'object', additionalProperties: { type: 'number' }, description: 'Admin-confirmed per-role capability (0–100).' })
+  capability_scores!: Record<string, number> | null;
 
   @ApiProperty({ example: false, description: 'True once every required field is present and at least one channel exists.' })
   complete!: boolean;
