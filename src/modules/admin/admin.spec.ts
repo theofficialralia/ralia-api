@@ -537,6 +537,10 @@ describe('admin — decisions, money and audit', () => {
       .send({ amount_minor: Number(FEE) }).expect(201);
     expect(requested.body.status).toBe(WithdrawalStatus.REQUESTED);
 
+    // §10 KYC gate: approval is refused until the promoter is verified.
+    await http().post(`/admin/withdrawals/${requested.body.id}/approve`).set(bearer(adminId, [Role.ADMIN])).expect(400);
+    await http().post(`/admin/promoters/${promoterId}/kyc`).send({ status: 'VERIFIED' }).set(bearer(adminId, [Role.ADMIN])).expect(200);
+
     await http().post(`/admin/withdrawals/${requested.body.id}/approve`).set(bearer(adminId, [Role.ADMIN])).expect(200);
     await http().post(`/admin/withdrawals/${requested.body.id}/record-paid`).set(bearer(adminId, [Role.ADMIN])).set(key())
       .send({ paid_ref: 'Zenith 99881' }).expect(200);

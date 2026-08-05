@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ReconciliationStatus, VerificationTier } from '@prisma/client';
+import { KycStatus, ReconciliationStatus, VerificationTier } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsInt, IsObject, IsOptional, IsPositive, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsEnum, IsIn, IsInt, IsObject, IsOptional, IsPositive, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { MoneyDto } from '../../ledger/money';
 
 /** Rejecting anything requires a reason (§6). */
@@ -24,6 +24,13 @@ export class SetCapabilityDto {
   })
   @IsObject()
   scores!: Record<string, number>;
+}
+
+/** Admin sets a promoter's KYC state after reviewing their ID evidence (§10). */
+export class SetKycDto {
+  @ApiProperty({ enum: KycStatus, example: KycStatus.VERIFIED })
+  @IsEnum(KycStatus)
+  status!: KycStatus;
 }
 
 /** Verifying a channel's audience evidence sets a proven tier (§1). */
@@ -90,6 +97,9 @@ export class WalletDto {
 
   @ApiProperty({ example: true, description: 'False when the balance is below the minimum.' })
   can_withdraw!: boolean;
+
+  @ApiProperty({ enum: KycStatus, description: 'KYC gate for payout — must be VERIFIED before a withdrawal is approved.' })
+  kyc_status!: KycStatus;
 }
 
 export class WithdrawalDto {

@@ -28,11 +28,18 @@ export class WalletService {
     });
     const pending = inFlight._sum.amountMinor ?? 0n;
 
+    const profile = await this.prisma.promoterProfile.findUnique({
+      where: { userId: promoterId },
+      select: { kycStatus: true },
+    });
+
     return {
       available: toMoney(available),
       pending_withdrawal: toMoney(pending),
       withdrawal_minimum: toMoney(minimum),
       can_withdraw: available - pending >= minimum,
+      // Surfaced so the app can prompt for KYC — payouts aren't approved until VERIFIED.
+      kyc_status: profile?.kycStatus ?? 'NONE',
     };
   }
 

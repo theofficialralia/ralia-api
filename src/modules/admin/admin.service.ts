@@ -6,6 +6,7 @@ import {
   ChannelStatus,
   ClientOrgStatus,
   EntryDirection,
+  KycStatus,
   Prisma,
   PromoterStatus,
   ReconciliationStatus,
@@ -117,6 +118,38 @@ export class AdminService {
     });
 
     return { id: userId, status: PromoterStatus.ACTIVE, message: 'Promoter approved.' };
+  }
+
+  /** Set a promoter's KYC state (§10) after reviewing their ID evidence. Gates cash-out. */
+  async setKyc(adminId: string, userId: string, status: KycStatus): Promise<AdminDecisionDto> {
+    const profile = await this.prisma.promoterProfile.findUnique({ where: { userId } });
+    if (!profile) throw new NotFoundException('No promoter profile for that user.');
+
+    const now = new Date();
+    const verified = status === KycStatus.VERIFIED;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.promoterProfile.update({
+        where: { userId },
+        data: {
+          kycStatus: status,
+          kycVerifiedAt: verified ? now : null,
+          kycVerifiedBy: verified ? adminId : null,
+        },
+      });
+      await this.audit.record(
+        {
+          actorId: adminId,
+          action: 'promoter.kyc',
+          entityType: 'promoter_profile',
+          entityId: userId,
+          before: { kycStatus: profile.kycStatus },
+          after: { kycStatus: status },
+        },
+        tx,
+      );
+    });
+
+    return { id: userId, status: profile.status, message: `KYC set to ${status}.` };
   }
 
   /** Admin override of computed per-role capability (§3). Merges over existing scores. */
@@ -567,6 +600,12 @@ export class AdminService {
       throw new ConflictException(`This withdrawal is ${withdrawal.status.toLowerCase()}.`);
     }
 
+    // §10 KYC gate: real money never leaves to an unverified identity.
+    const profile = await this.prisma.promoterProfile.findUnique({ where: { userId: withdrawal.promoterId } });
+    if (profile?.kycStatus !== KycStatus.VERIFIED) {
+      throw new BadRequestException('This promoter is not KYC-verified — verify their identity before approving a payout.');
+    }
+
     await this.prisma.$transaction(async (tx) => {
       await tx.withdrawal.update({
         where: { id: withdrawalId },
@@ -942,7 +981,7 @@ export class AdminService {
     const rows = await this.prisma.withdrawal.findMany({
       where: { status: { in: [WithdrawalStatus.REQUESTED, WithdrawalStatus.APPROVED] } },
       include: {
-        promoter: { select: { promoterProfile: { select: { fullName: true } } } },
+        promoter: { select: { promoterProfile: { select: { fullName: true, kycStatus: true } } } },
         bankAccount: { select: { accountName: true, accountNumberLast4: true, bankCode: true } },
       },
       orderBy: { createdAt: 'asc' },
@@ -951,6 +990,9 @@ export class AdminService {
       id: w.id,
       promoter_id: w.promoterId,
       promoter_name: w.promoter.promoterProfile?.fullName ?? null,
+      // Surfaced so the admin sees the §10 gate before approving — an unverified
+      // promoter's payout will be refused.
+      kyc_status: w.promoter.promoterProfile?.kycStatus ?? 'NONE',
       amount: toMoney(w.amountMinor),
       status: w.status,
       bank: { account_name: w.bankAccount.accountName, last4: w.bankAccount.accountNumberLast4, bank_code: w.bankAccount.bankCode },

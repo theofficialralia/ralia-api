@@ -6,7 +6,7 @@ import { AuthedUser } from '../../common/auth/jwt-auth.guard';
 import { RequiresCapability, Roles } from '../../common/auth/roles.guard';
 import { RequiresIdempotencyKey } from '../../common/idempotency/idempotency.guard';
 import { AdminService } from './admin.service';
-import { AdminDecisionDto, ApproveSubmissionDto, FundCampaignDto, RateConfigUpdateDto, ReconciliationReportDto, RecordWithdrawalPaidDto, RejectDto, SetCapabilityDto, SettleGatewayPaymentDto, VerifyChannelDto } from './dto/admin.dto';
+import { AdminDecisionDto, ApproveSubmissionDto, FundCampaignDto, RateConfigUpdateDto, ReconciliationReportDto, RecordWithdrawalPaidDto, RejectDto, SetCapabilityDto, SetKycDto, SettleGatewayPaymentDto, VerifyChannelDto } from './dto/admin.dto';
 
 /**
  * Admin console API.
@@ -87,6 +87,19 @@ export class AdminController {
     @Body() dto: SetCapabilityDto,
   ): Promise<AdminDecisionDto> {
     return this.admin.setCapability(admin.id, id, dto.scores);
+  }
+
+  @Post('promoters/:id/kyc')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Set a promoter’s KYC state (§10)', description: 'Gates cash-out — a payout can only be approved once KYC is VERIFIED.' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  setKyc(
+    @CurrentUser() admin: AuthedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetKycDto,
+  ): Promise<AdminDecisionDto> {
+    return this.admin.setKyc(admin.id, id, dto.status);
   }
 
   // ── Campaigns ────────────────────────────────────────────

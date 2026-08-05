@@ -207,6 +207,15 @@ enum PromoterStatus {
   ACTIVE
 }
 
+// KYC gate for cash-out (§10). A promoter must be VERIFIED before a withdrawal is
+// approved — real money never leaves to an unverified identity.
+enum KycStatus {
+  NONE
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
 enum Gender {
   MALE
   FEMALE
@@ -287,6 +296,11 @@ model PromoterProfile {
   capabilityScores      Json?          @map("capability_scores")
   capabilityConfirmedBy String?        @map("capability_confirmed_by") @db.Uuid
   capabilityConfirmedAt DateTime?      @map("capability_confirmed_at")
+
+  // §10 KYC — gates cash-out. Set by an admin at review of the promoter's ID evidence.
+  kycStatus     KycStatus @default(NONE) @map("kyc_status")
+  kycVerifiedAt DateTime? @map("kyc_verified_at")
+  kycVerifiedBy String?   @map("kyc_verified_by") @db.Uuid
 
   approvedBy String?   @map("approved_by") @db.Uuid
   approvedAt DateTime? @map("approved_at")
