@@ -246,6 +246,34 @@ export class AdminController {
     return this.admin.recordWithdrawalPaid(admin.id, id, dto.paid_ref, idempotencyKey);
   }
 
+  @Post('withdrawals/:id/fail')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.RECORD_MONEY)
+  @ApiOperation({ summary: 'Fail a not-yet-paid withdrawal (reason required)', description: 'REQUESTED/APPROVED → FAILED. The balance is untouched — nothing was posted yet.' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  failWithdrawal(
+    @CurrentUser() admin: AuthedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectDto,
+  ): Promise<AdminDecisionDto> {
+    return this.admin.failWithdrawal(admin.id, id, dto.reason);
+  }
+
+  @Post('withdrawals/:id/reverse')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.RECORD_MONEY)
+  @RequiresIdempotencyKey()
+  @ApiOperation({ summary: 'Reverse a paid withdrawal that bounced (reason required)', description: 'DR BANK_CLEARING / CR PROMOTER_AVAILABLE — funds return to the promoter’s balance. Requires an Idempotency-Key.' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  reverseWithdrawal(
+    @CurrentUser() admin: AuthedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectDto,
+    @Headers('idempotency-key') idempotencyKey: string,
+  ): Promise<AdminDecisionDto> {
+    return this.admin.reverseWithdrawal(admin.id, id, dto.reason, idempotencyKey);
+  }
+
   // ── Gateway reconciliation ───────────────────────────────
 
   @Get('reconciliation')

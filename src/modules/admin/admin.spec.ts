@@ -330,6 +330,38 @@ describe('admin — decisions, money and audit', () => {
     await http().post(`/admin/promoters/${promoterId}/capability`).send({ scores: { GHOST: 50 } }).set(bearer(adminId, [Role.ADMIN])).expect(400);
   });
 
+  it('fails a not-yet-paid withdrawal without touching the balance', async () => {
+    const { promoterId, adminId } = await makePendingSubmission();
+    const bank = await prisma.promoterBankAccount.findFirstOrThrow({ where: { userId: promoterId } });
+    const w = await prisma.withdrawal.create({
+      data: { promoterId, amountMinor: 500000n, bankAccountId: bank.id, status: WithdrawalStatus.REQUESTED },
+    });
+
+    await http().post(`/admin/withdrawals/${w.id}/fail`).send({ reason: 'Bank details don’t match the account name.' }).set(bearer(adminId, [Role.ADMIN])).expect(200);
+
+    expect((await prisma.withdrawal.findUniqueOrThrow({ where: { id: w.id } })).status).toBe(WithdrawalStatus.FAILED);
+    expect(await balanceOf(AccountKind.PROMOTER_AVAILABLE, promoterId)).toBe(0n); // nothing was ever debited
+  });
+
+  it('reverses a paid withdrawal that bounced, returning the funds to the promoter', async () => {
+    const { submissionId, promoterId, adminId } = await makePendingSubmission();
+    // Pay the promoter so they have a real balance to withdraw.
+    await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: PROMISED }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+    expect(await balanceOf(AccountKind.PROMOTER_AVAILABLE, promoterId)).toBe(FEE);
+
+    const bank = await prisma.promoterBankAccount.findFirstOrThrow({ where: { userId: promoterId } });
+    const w = await prisma.withdrawal.create({
+      data: { promoterId, amountMinor: FEE, bankAccountId: bank.id, status: WithdrawalStatus.APPROVED, approvedBy: adminId },
+    });
+    await http().post(`/admin/withdrawals/${w.id}/record-paid`).send({ paid_ref: 'TRF-1' }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+    expect(await balanceOf(AccountKind.PROMOTER_AVAILABLE, promoterId)).toBe(0n); // paid out
+
+    await http().post(`/admin/withdrawals/${w.id}/reverse`).send({ reason: 'Transfer bounced — account closed.' }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+
+    expect((await prisma.withdrawal.findUniqueOrThrow({ where: { id: w.id } })).status).toBe(WithdrawalStatus.REVERSED);
+    expect(await balanceOf(AccountKind.PROMOTER_AVAILABLE, promoterId)).toBe(FEE); // returned to balance
+  });
+
   it('writes an audit row for every money- or score-affecting decision', async () => {
     const adminId = await makeAdmin();
     const promoterId = await makePromoter(PromoterStatus.AWAITING_APPROVAL);

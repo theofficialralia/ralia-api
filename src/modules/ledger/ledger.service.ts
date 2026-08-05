@@ -404,6 +404,33 @@ export class LedgerService {
     });
   }
 
+  /**
+   * Reverse a paid withdrawal whose bank transfer bounced — the exact inverse of
+   * payWithdrawal: DR BANK_CLEARING / CR PROMOTER_AVAILABLE, returning the money to
+   * the promoter's spendable balance. Idempotent via the key.
+   */
+  async reverseWithdrawal(args: {
+    withdrawalId: string;
+    promoterAccountId: string;
+    amountMinor: bigint;
+    idempotencyKey: string;
+    actorId?: string;
+  }): Promise<{ transactionId: string; replayed: boolean }> {
+    const bankClearing = await this.getPlatformAccountId(AccountKind.BANK_CLEARING);
+    return this.post({
+      kind: LedgerTransactionKind.WITHDRAWAL_REVERSED,
+      referenceType: 'withdrawal',
+      referenceId: args.withdrawalId,
+      idempotencyKey: args.idempotencyKey,
+      memo: `Withdrawal ${args.withdrawalId} reversed`,
+      createdBy: args.actorId,
+      entries: [
+        { accountId: bankClearing, direction: EntryDirection.DEBIT, amountMinor: args.amountMinor },
+        { accountId: args.promoterAccountId, direction: EntryDirection.CREDIT, amountMinor: args.amountMinor },
+      ],
+    });
+  }
+
   /** Campaign ends with unspent escrow. DR CAMPAIGN_ESCROW / CR CLIENT_WALLET. */
   async refundCampaign(args: {
     campaignId: string;

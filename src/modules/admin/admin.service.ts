@@ -657,6 +657,103 @@ export class AdminService {
     return { id: withdrawalId, status: WithdrawalStatus.PAID, message: replayed ? 'Already recorded.' : 'Payout recorded.' };
   }
 
+  /**
+   * Fail a withdrawal that never reached PAID (bad bank details, admin declines).
+   * REQUESTED/APPROVED → FAILED with a reason. No ledger posting existed yet, so this
+   * simply releases the implicit reservation — the funds were never debited.
+   */
+  async failWithdrawal(adminId: string, withdrawalId: string, reason: string): Promise<AdminDecisionDto> {
+    const withdrawal = await this.prisma.withdrawal.findUnique({ where: { id: withdrawalId } });
+    if (!withdrawal) throw new NotFoundException('No such withdrawal.');
+    if (withdrawal.status !== WithdrawalStatus.REQUESTED && withdrawal.status !== WithdrawalStatus.APPROVED) {
+      throw new ConflictException(`Only a requested or approved withdrawal can be failed (this one is ${withdrawal.status.toLowerCase()}). A paid one must be reversed.`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.withdrawal.update({ where: { id: withdrawalId }, data: { status: WithdrawalStatus.FAILED, failureReason: reason } });
+      await this.notifications.create(
+        {
+          userId: withdrawal.promoterId,
+          type: 'withdrawal.failed',
+          title: 'Withdrawal couldn’t be sent',
+          body: `Your withdrawal of ${formatNaira(withdrawal.amountMinor)} couldn’t be processed: ${reason} Your balance is unchanged — you can request it again.`,
+          data: { withdrawalId, reason },
+          dedupeKey: `withdrawal.failed:${withdrawalId}`,
+        },
+        tx,
+      );
+      await this.audit.record(
+        {
+          actorId: adminId,
+          action: 'withdrawal.fail',
+          entityType: 'withdrawal',
+          entityId: withdrawalId,
+          before: { status: withdrawal.status },
+          after: { status: WithdrawalStatus.FAILED, reason },
+        },
+        tx,
+      );
+    });
+
+    return { id: withdrawalId, status: WithdrawalStatus.FAILED, message: 'Withdrawal failed; the promoter’s balance is intact.' };
+  }
+
+  /**
+   * Reverse a PAID withdrawal whose transfer bounced: reverse the ledger posting so
+   * the money returns to the promoter's available balance, then mark it REVERSED.
+   * Idempotent via the key, like recordWithdrawalPaid.
+   */
+  async reverseWithdrawal(adminId: string, withdrawalId: string, reason: string, idempotencyKey: string): Promise<AdminDecisionDto> {
+    const withdrawal = await this.prisma.withdrawal.findUnique({ where: { id: withdrawalId } });
+    if (!withdrawal) throw new NotFoundException('No such withdrawal.');
+
+    if (await this.ledger.alreadyPosted(idempotencyKey)) {
+      return { id: withdrawalId, status: withdrawal.status, message: 'Already recorded.' };
+    }
+    if (withdrawal.status !== WithdrawalStatus.PAID) {
+      throw new ConflictException(`Only a paid withdrawal can be reversed (this one is ${withdrawal.status.toLowerCase()}).`);
+    }
+
+    const promoterAccountId = await this.ledger.getOrCreateAccount(AccountKind.PROMOTER_AVAILABLE, withdrawal.promoterId);
+    const { replayed } = await this.ledger.reverseWithdrawal({
+      withdrawalId,
+      promoterAccountId,
+      amountMinor: withdrawal.amountMinor,
+      idempotencyKey,
+      actorId: adminId,
+    });
+
+    if (!replayed) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.withdrawal.update({ where: { id: withdrawalId }, data: { status: WithdrawalStatus.REVERSED, failureReason: reason } });
+        await this.notifications.create(
+          {
+            userId: withdrawal.promoterId,
+            type: 'withdrawal.reversed',
+            title: 'Withdrawal returned to your balance',
+            body: `Your ${formatNaira(withdrawal.amountMinor)} transfer didn’t go through: ${reason} We’ve added it back to your balance — you can withdraw again.`,
+            data: { withdrawalId, reason },
+            dedupeKey: `withdrawal.reversed:${withdrawalId}`,
+          },
+          tx,
+        );
+        await this.audit.record(
+          {
+            actorId: adminId,
+            action: 'withdrawal.reverse',
+            entityType: 'withdrawal',
+            entityId: withdrawalId,
+            before: { status: WithdrawalStatus.PAID },
+            after: { status: WithdrawalStatus.REVERSED, reason, amountMinor: withdrawal.amountMinor },
+          },
+          tx,
+        );
+      });
+    }
+
+    return { id: withdrawalId, status: WithdrawalStatus.REVERSED, message: replayed ? 'Already recorded.' : 'Withdrawal reversed; funds returned to the promoter.' };
+  }
+
   // ── Queues ───────────────────────────────────────────────
   // Thin: plain lists of what needs a decision. Filtering and pagination are
   // the harden slice.
