@@ -4536,6 +4536,10 @@
           "slots_filled": {
             "type": "number"
           },
+          "total_clicks": {
+            "type": "number",
+            "description": "Human clicks delivered — present on the single-campaign detail."
+          },
           "price": {
             "nullable": true,
             "description": "The price quoted, frozen at quote time.",
@@ -5717,6 +5721,11 @@
             "type": "number",
             "example": 41230
           },
+          "clicks_delivered": {
+            "type": "number",
+            "example": 1820,
+            "description": "Human clicks driven through tracking links (bots excluded)."
+          },
           "cost_per_view": {
             "description": "spent ÷ views, or ₦0 when there are no views yet.",
             "allOf": [
@@ -5765,6 +5774,7 @@
           "spent",
           "budget",
           "views_delivered",
+          "clicks_delivered",
           "cost_per_view",
           "offers_sent",
           "offers_accepted",

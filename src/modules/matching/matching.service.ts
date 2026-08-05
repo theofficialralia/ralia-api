@@ -427,8 +427,18 @@ export class MatchingService {
       include: {
         campaign: { select: { name: true, objective: true, promoterInstructions: true, destinationUrl: true } },
         submissions: { orderBy: { submittedAt: 'desc' }, take: 1, select: { verdict: true, rejectReason: true } },
+        trackingLink: { select: { token: true } },
       },
     });
+
+    // Human clicks (bots excluded) driven through each assignment's tracking link —
+    // one grouped query over all their tokens, so the promoter sees their real impact.
+    const tokens = rows.map((r) => r.trackingLink?.token).filter((t): t is string => !!t);
+    const grouped = tokens.length
+      ? await this.prisma.clickEvent.groupBy({ by: ['token'], where: { token: { in: tokens }, isBot: false }, _count: { _all: true } })
+      : [];
+    const clicksByToken = new Map(grouped.map((g) => [g.token, g._count._all]));
+
     return rows.map((a) => ({
       id: a.id,
       campaign_id: a.campaignId,
@@ -441,6 +451,7 @@ export class MatchingService {
       due_at: a.dueAt?.toISOString() ?? null,
       instructions: a.campaign.promoterInstructions,
       destination_url: a.campaign.destinationUrl,
+      clicks: a.trackingLink ? clicksByToken.get(a.trackingLink.token) ?? 0 : 0,
       latest_verdict: a.submissions[0]?.verdict ?? null,
       reject_reason: a.submissions[0]?.rejectReason ?? null,
     }));

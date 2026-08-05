@@ -280,6 +280,25 @@ describe('admin — decisions, money and audit', () => {
     expect((await prisma.submission.findUniqueOrThrow({ where: { id: submissionId } })).verdict).toBe(Verdict.PENDING);
   });
 
+  it('surfaces human click counts on the submission queue and campaign detail', async () => {
+    const { submissionId, campaignId, adminId } = await makePendingSubmission();
+    const assignmentId = (await prisma.submission.findUniqueOrThrow({ where: { id: submissionId }, select: { assignmentId: true } })).assignmentId;
+    const link = await prisma.trackingLink.create({ data: { token: `tk-${assignmentId.slice(0, 8)}`, assignmentId, destinationUrl: 'https://x.example/go' } });
+    await prisma.clickEvent.createMany({
+      data: [
+        { token: link.token, ipHash: 'a', uaHash: 'a', isBot: false },
+        { token: link.token, ipHash: 'b', uaHash: 'b', isBot: false },
+        { token: link.token, ipHash: 'c', uaHash: 'c', isBot: true }, // excluded
+      ],
+    });
+
+    const subs = await http().get('/admin/queues/submissions').set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect(subs.body.find((s: { id: string }) => s.id === submissionId).clicks).toBe(2);
+
+    const detail = await http().get(`/admin/campaigns/${campaignId}`).set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect(detail.body.total_clicks).toBe(2);
+  });
+
   it('rejecting a submission dings the promoter trust −6 and leaves the assignment resubmittable', async () => {
     const { submissionId, promoterId, adminId } = await makePendingSubmission();
 

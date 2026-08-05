@@ -213,6 +213,9 @@ export class CampaignDto {
   @ApiProperty()
   slots_filled!: number;
 
+  @ApiPropertyOptional({ description: 'Human clicks delivered — present on the single-campaign detail.' })
+  total_clicks?: number;
+
   @ApiProperty({ type: MoneyDto, nullable: true, description: 'The price quoted, frozen at quote time.' })
   price!: MoneyDto | null;
 

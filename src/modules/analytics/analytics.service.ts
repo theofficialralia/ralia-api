@@ -65,12 +65,13 @@ export class AnalyticsService {
   async campaignAnalytics(userId: string, campaignId: string): Promise<CampaignAnalyticsDto> {
     const campaign = await this.ownedCampaign(userId, campaignId);
 
-    const [spent, views, completed, offersSent, offersAccepted] = await Promise.all([
+    const [spent, views, completed, offersSent, offersAccepted, clicks] = await Promise.all([
       this.spentMinor(campaign),
       this.viewsFor(campaignId),
       this.completedCount(campaignId),
       this.prisma.offer.count({ where: { campaignId } }),
       this.prisma.offer.count({ where: { campaignId, status: OfferStatus.ACCEPTED } }),
+      this.prisma.clickEvent.count({ where: { isBot: false, trackingLink: { assignment: { campaignId } } } }),
     ]);
 
     // Integer-kobo cost per view; floor is fine for a display metric.
@@ -86,6 +87,7 @@ export class AnalyticsService {
       spent: toMoney(spent),
       budget: toMoney(campaign.budgetMinor),
       views_delivered: views,
+      clicks_delivered: clicks,
       cost_per_view: toMoney(costPerView),
       offers_sent: offersSent,
       offers_accepted: offersAccepted,

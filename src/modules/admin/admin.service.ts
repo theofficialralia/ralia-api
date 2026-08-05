@@ -944,11 +944,16 @@ export class AdminService {
       },
     });
     if (!c) throw new NotFoundException('No such campaign.');
+    // Total human clicks delivered across the campaign's assignments.
+    const totalClicks = await this.prisma.clickEvent.count({
+      where: { isBot: false, trackingLink: { assignment: { campaignId } } },
+    });
     return {
       id: c.id,
       name: c.name,
       status: c.status,
       objective: c.objective,
+      total_clicks: totalClicks,
       description: c.description,
       promoter_instructions: c.promoterInstructions,
       destination_url: c.destinationUrl,
@@ -1012,6 +1017,11 @@ export class AdminService {
           fee: toMoney(s.assignment.feeMinor),
           promised_reach: s.assignment.promisedReach,
           claimed_views: s.claimedViews,
+          // Real human clicks driven — a delivery signal the admin weighs against the
+          // self-reported view count when verifying.
+          clicks: await this.prisma.clickEvent.count({
+            where: { isBot: false, trackingLink: { assignmentId: s.assignmentId } },
+          }),
           auto_flag: s.autoFlag,
           public_url: s.publicUrl,
           note: s.note,

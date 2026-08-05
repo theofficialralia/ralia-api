@@ -64,6 +64,9 @@ export class CampaignAnalyticsDto {
   @ApiProperty({ example: 41230 })
   views_delivered!: number;
 
+  @ApiProperty({ example: 1820, description: 'Human clicks driven through tracking links (bots excluded).' })
+  clicks_delivered!: number;
+
   @ApiProperty({ type: MoneyDto, description: 'spent ÷ views, or ₦0 when there are no views yet.' })
   cost_per_view!: MoneyDto;
 

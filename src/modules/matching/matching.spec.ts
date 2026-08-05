@@ -286,6 +286,24 @@ describe('matching — candidates, offers, accept', () => {
     expect(candidate!.capability).toBe(95); // the stored score, verbatim
   });
 
+  it('surfaces human clicks (bots excluded) on my assignments', async () => {
+    const campaignId = await makeLiveCampaign(1, { minReach: 500 });
+    const p = await makePromoter();
+    const offerId = await sendOffer(campaignId, p.userId);
+    const a = await matching.accept(offerId, p.userId);
+    const link = await prisma.trackingLink.findUniqueOrThrow({ where: { assignmentId: a.id } });
+    await prisma.clickEvent.createMany({
+      data: [
+        { token: link.token, ipHash: 'h1', uaHash: 'u1', isBot: false },
+        { token: link.token, ipHash: 'h2', uaHash: 'u2', isBot: false },
+        { token: link.token, ipHash: 'h3', uaHash: 'u3', isBot: true }, // excluded
+      ],
+    });
+
+    const mine = await matching.myAssignments(p.userId);
+    expect(mine[0]!.clicks).toBe(2);
+  });
+
   it('notifies the promoter when an offer is created', async () => {
     const campaignId = await makeLiveCampaign(10, { minReach: 500 });
     const p = await makePromoter();

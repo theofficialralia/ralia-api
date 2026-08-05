@@ -82,7 +82,12 @@ export class CampaignsService {
   }
 
   async get(userId: string, campaignId: string): Promise<CampaignDto> {
-    return this.toDto(await this.ownedCampaign(userId, campaignId));
+    const campaign = await this.ownedCampaign(userId, campaignId);
+    // Delivery proof for the client: human clicks driven across the campaign.
+    const totalClicks = await this.prisma.clickEvent.count({
+      where: { isBot: false, trackingLink: { assignment: { campaignId } } },
+    });
+    return { ...this.toDto(campaign), total_clicks: totalClicks };
   }
 
   async list(userId: string): Promise<CampaignDto[]> {
