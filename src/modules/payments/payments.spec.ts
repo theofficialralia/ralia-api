@@ -25,6 +25,11 @@ class StubPaystack {
   async verify(reference: string): Promise<PaystackVerification> {
     return { ...this.next, reference };
   }
+  // In tests a signature is "valid" iff it equals the literal 'good' — the real HMAC
+  // is exercised by PaystackService itself; here we test the routing/funding.
+  verifySignature(_rawBody: Buffer, signature: string | undefined): boolean {
+    return signature === 'good';
+  }
 }
 
 describe('payments — Paystack verify + fund', () => {
@@ -55,7 +60,7 @@ describe('payments — Paystack verify + fund', () => {
       .useValue(paystack)
       .compile();
 
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication({ rawBody: true });
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
     await app.init();
     jwt = app.get(JwtService);
@@ -171,5 +176,47 @@ describe('payments — Paystack verify + fund', () => {
     await prisma.campaign.update({ where: { id: campaignId }, data: { status: CampaignStatus.LIVE } });
     await http().post(`/campaigns/${campaignId}/payments/paystack/verify`).set(bearer(ownerId)).set(key())
       .send({ reference: 'RLA-y' }).expect(409);
+  });
+
+  // ── Webhook backstop ─────────────────────────────────────
+
+  const webhook = (body: unknown, signature: string) =>
+    http().post('/payments/paystack/webhook').set('x-paystack-signature', signature).send(body as object);
+
+  it('a signed charge.success webhook funds the campaign even without the client callback', async () => {
+    const { campaignId } = await quotedCampaign();
+
+    await webhook({ event: 'charge.success', data: { reference: 'RLA-hook-1', metadata: { campaign_id: campaignId } } }, 'good').expect(200);
+
+    const c = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+    expect(c.status).toBe(CampaignStatus.LIVE);
+    expect(await escrowBalance(campaignId)).toBe(PRICE);
+  });
+
+  it('rejects a webhook with a bad signature and moves no money', async () => {
+    const { campaignId } = await quotedCampaign();
+
+    await webhook({ event: 'charge.success', data: { reference: 'RLA-hook-2', metadata: { campaign_id: campaignId } } }, 'forged').expect(401);
+
+    expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).status).toBe(CampaignStatus.QUOTED);
+  });
+
+  it('ignores a non-charge.success event', async () => {
+    const { campaignId } = await quotedCampaign();
+
+    await webhook({ event: 'charge.failed', data: { reference: 'RLA-hook-3', metadata: { campaign_id: campaignId } } }, 'good').expect(200);
+
+    expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).status).toBe(CampaignStatus.QUOTED);
+  });
+
+  it('is idempotent with the client verify — the same reference funds once', async () => {
+    const { ownerId, campaignId } = await quotedCampaign();
+    await http().post(`/campaigns/${campaignId}/payments/paystack/verify`).set(bearer(ownerId)).set(key())
+      .send({ reference: 'RLA-hook-4' }).expect(200);
+
+    // The webhook arrives for the same reference — must not double-credit.
+    await webhook({ event: 'charge.success', data: { reference: 'RLA-hook-4', metadata: { campaign_id: campaignId } } }, 'good').expect(200);
+
+    expect(await escrowBalance(campaignId)).toBe(PRICE);
   });
 });

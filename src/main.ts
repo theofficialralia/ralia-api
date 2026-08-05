@@ -13,7 +13,9 @@ import { setupSwagger } from './swagger';
 };
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // rawBody: the Paystack webhook signature is an HMAC over the exact bytes we
+  // received, so we need the unparsed body alongside the parsed one.
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, rawBody: true });
 
   app.useLogger(app.get(Logger));
   app.use(helmet());

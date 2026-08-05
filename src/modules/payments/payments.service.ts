@@ -1,5 +1,5 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AccountKind, CampaignStatus } from '@prisma/client';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { AccountKind, Campaign, CampaignStatus } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { AuditService } from '../admin/audit.service';
@@ -22,12 +22,66 @@ export class PaymentsService {
     private readonly paystack: PaystackService,
   ) {}
 
+  private readonly logger = new Logger(PaymentsService.name);
+
+  /** Client-initiated: verify the reference and fund the caller's own campaign. */
   async verifyAndFund(userId: string, campaignId: string, reference: string): Promise<{ status: string; message: string }> {
     const org = await this.prisma.clientOrg.findFirst({ where: { ownerUserId: userId } });
     if (!org) throw new ForbiddenException('This account has no client organisation.');
 
     const campaign = await this.prisma.campaign.findUnique({ where: { id: campaignId } });
     if (!campaign || campaign.clientOrgId !== org.id) throw new NotFoundException('No such campaign.');
+
+    return this.settleCharge(campaign, reference, userId);
+  }
+
+  /**
+   * Paystack webhook backstop: a charge.success signed by Paystack funds the campaign
+   * even if the client never fired the verify callback (browser closed after paying).
+   * Authenticity is the HMAC signature; we still re-verify the reference and match the
+   * amount before moving money. Shares settleCharge, so it's idempotent with the client
+   * path via the reference key.
+   */
+  async handleWebhook(rawBody: Buffer, signature: string | undefined): Promise<{ handled: boolean }> {
+    if (!this.paystack.verifySignature(rawBody, signature)) {
+      throw new UnauthorizedException('Invalid webhook signature.');
+    }
+    const event = JSON.parse(rawBody.toString('utf8')) as {
+      event?: string;
+      data?: { reference?: string; metadata?: { campaign_id?: string } };
+    };
+    if (event.event !== 'charge.success') return { handled: false };
+
+    const reference = event.data?.reference;
+    const campaignId = event.data?.metadata?.campaign_id;
+    if (!reference || !campaignId) {
+      this.logger.warn('charge.success without a reference/campaign_id — ignoring.');
+      return { handled: false };
+    }
+
+    const campaign = await this.prisma.campaign.findUnique({ where: { id: campaignId } });
+    if (!campaign) {
+      this.logger.warn(`Webhook for unknown campaign ${campaignId} — ignoring.`);
+      return { handled: false };
+    }
+    // Attribute the funding to the campaign owner; the webhook has no session user.
+    const org = await this.prisma.clientOrg.findUnique({ where: { id: campaign.clientOrgId }, select: { ownerUserId: true } });
+    try {
+      await this.settleCharge(campaign, reference, org?.ownerUserId ?? campaign.clientOrgId);
+    } catch (err) {
+      // Already-funded / not-fundable are expected when the client verify won the race.
+      if (err instanceof ConflictException) return { handled: true };
+      throw err;
+    }
+    return { handled: true };
+  }
+
+  /**
+   * The shared settle core: idempotent on the reference, re-verifies the charge with
+   * Paystack, matches the amount, credits escrow and takes the campaign LIVE, and opens
+   * a reconciliation row. Used by both the client verify and the webhook.
+   */
+  private async settleCharge(campaign: Campaign, reference: string, actorId: string): Promise<{ status: string; message: string }> {
     if (campaign.priceMinor === null) throw new BadRequestException('Get a quote before paying.');
 
     // Idempotency keyed on the Paystack reference itself: verifying the same
@@ -50,6 +104,8 @@ export class PaymentsService {
       throw new BadRequestException('The amount paid does not match the campaign price.');
     }
 
+    const campaignId = campaign.id;
+    const userId = actorId;
     const escrowAccountId =
       campaign.escrowAccountId ?? (await this.ledger.getOrCreateAccount(AccountKind.CAMPAIGN_ESCROW, campaignId));
 

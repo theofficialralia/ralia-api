@@ -1,4 +1,5 @@
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 
 export type PaystackVerification = {
   status: string; // 'success' when the charge went through
@@ -48,5 +49,17 @@ export class PaystackService {
       currency: body.data.currency ?? 'NGN',
       reference: body.data.reference ?? reference,
     };
+  }
+
+  /**
+   * A webhook is authentic iff x-paystack-signature is HMAC-SHA512(rawBody) under
+   * our secret. Constant-time compared so a mismatch leaks no timing signal.
+   */
+  verifySignature(rawBody: Buffer, signature: string | undefined): boolean {
+    if (!signature) return false;
+    const expected = createHmac('sha512', this.secret).update(rawBody).digest('hex');
+    const a = Buffer.from(expected);
+    const b = Buffer.from(signature);
+    return a.length === b.length && timingSafeEqual(a, b);
   }
 }
