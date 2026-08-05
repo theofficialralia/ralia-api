@@ -687,11 +687,14 @@ export class AdminService {
       },
       orderBy: { updatedAt: 'asc' },
     });
-    return rows.map((p) => ({
+    return Promise.all(rows.map(async (p) => ({
       user_id: p.userId,
       full_name: p.fullName,
       location_state: p.locationState,
       trust_score: p.trustScore.toNumber(),
+      roles: p.roles,
+      // A live preview of the §3 capability the admin is confirming — approval freezes it.
+      capability_preview: await this.scoring.computeCapability(p.userId, {}, this.prisma),
       email: p.user.email,
       phone_e164: p.user.phoneE164,
       // The admin checks these against the claimed reach before approving (§5.3).
@@ -709,7 +712,7 @@ export class AdminService {
         active_participants: c.activeParticipants,
         status: c.status,
       })),
-    }));
+    })));
   }
 
   async pendingCampaigns() {

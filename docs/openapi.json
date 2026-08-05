@@ -1585,6 +1585,63 @@
         ]
       }
     },
+    "/v1/admin/promoters/{id}/capability": {
+      "post": {
+        "description": "Merges the given 0–100 scores over the computed ones and records the confirmation.",
+        "operationId": "AdminController_setCapability",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCapabilityDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Override a promoter’s per-role capability (§3)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/live-campaigns": {
       "get": {
         "description": "The campaigns an admin can match promoters to.",
@@ -3775,6 +3832,35 @@
             "example": 50,
             "description": "Set by admins, not by the promoter."
           },
+          "roles": {
+            "type": "array",
+            "description": "Roles this promoter offers.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "DISTRIBUTOR",
+                "CREATOR",
+                "PARTICIPATOR",
+                "INFLUENCER"
+              ]
+            }
+          },
+          "capability_inputs": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Self-reported capability factors (0–1)."
+          },
+          "capability_scores": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Admin-confirmed per-role capability (0–100)."
+          },
           "complete": {
             "type": "boolean",
             "example": false,
@@ -3803,6 +3889,9 @@
           "preferred_categories",
           "max_campaigns_per_week",
           "trust_score",
+          "roles",
+          "capability_inputs",
+          "capability_scores",
           "complete",
           "missing"
         ]
@@ -3858,6 +3947,26 @@
             "example": 3,
             "minimum": 1,
             "maximum": 20
+          },
+          "roles": {
+            "type": "array",
+            "description": "The roles this promoter offers.",
+            "items": {
+              "type": "string",
+              "enum": [
+                "DISTRIBUTOR",
+                "CREATOR",
+                "PARTICIPATOR",
+                "INFLUENCER"
+              ]
+            }
+          },
+          "capability_inputs": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Self-reported capability factors, each normalised 0–1."
           }
         }
       },
@@ -4513,6 +4622,25 @@
         },
         "required": [
           "reason"
+        ]
+      },
+      "SetCapabilityDto": {
+        "type": "object",
+        "properties": {
+          "scores": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            },
+            "example": {
+              "DISTRIBUTOR": 78,
+              "CREATOR": 60
+            },
+            "description": "Per-role capability, 0–100. Merged over the computed scores."
+          }
+        },
+        "required": [
+          "scores"
         ]
       },
       "FundCampaignDto": {
