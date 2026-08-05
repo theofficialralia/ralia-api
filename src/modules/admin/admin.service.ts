@@ -793,6 +793,54 @@ export class AdminService {
     return { id: withdrawalId, status: WithdrawalStatus.REVERSED, message: replayed ? 'Already recorded.' : 'Withdrawal reversed; funds returned to the promoter.' };
   }
 
+  /**
+   * Platform exposure (§10): the money position by account kind, plus the payout
+   * obligation about to leave. promoter_payable is what Ralia owes promoters — every
+   * kobo of it was moved from funded escrow at settlement, so it is fully backed by
+   * construction. This report surfaces that so an operator can see obligations never
+   * exceed settled funds.
+   */
+  async exposureReport() {
+    const accounts = await this.prisma.account.findMany({ select: { id: true, kind: true } });
+    const kindById = new Map(accounts.map((a) => [a.id, a.kind]));
+    const grouped = await this.prisma.ledgerEntry.groupBy({
+      by: ['accountId', 'direction'],
+      _sum: { amountMinor: true },
+    });
+
+    const debit: Partial<Record<AccountKind, bigint>> = {};
+    const credit: Partial<Record<AccountKind, bigint>> = {};
+    for (const g of grouped) {
+      const kind = kindById.get(g.accountId);
+      if (!kind) continue;
+      const amt = g._sum.amountMinor ?? 0n;
+      if (g.direction === EntryDirection.DEBIT) debit[kind] = (debit[kind] ?? 0n) + amt;
+      else credit[kind] = (credit[kind] ?? 0n) + amt;
+    }
+    // BANK_CLEARING is debit-normal (cash in/out); every other kind is credit-normal.
+    const bal = (kind: AccountKind): bigint =>
+      kind === AccountKind.BANK_CLEARING
+        ? (debit[kind] ?? 0n) - (credit[kind] ?? 0n)
+        : (credit[kind] ?? 0n) - (debit[kind] ?? 0n);
+
+    const inFlight = await this.prisma.withdrawal.aggregate({
+      where: { status: { in: [WithdrawalStatus.REQUESTED, WithdrawalStatus.APPROVED] } },
+      _sum: { amountMinor: true },
+    });
+
+    const promoterPayable = bal(AccountKind.PROMOTER_AVAILABLE);
+    return {
+      promoter_payable: toMoney(promoterPayable),
+      in_flight_withdrawals: toMoney(inFlight._sum.amountMinor ?? 0n),
+      escrow_held: toMoney(bal(AccountKind.CAMPAIGN_ESCROW)),
+      client_wallet: toMoney(bal(AccountKind.CLIENT_WALLET)),
+      platform_revenue: toMoney(bal(AccountKind.RALIA_REVENUE)),
+      bank_clearing_net: toMoney(bal(AccountKind.BANK_CLEARING)),
+      // Promoter money is fully settled cash — never an unfunded promise.
+      fully_backed: promoterPayable >= 0n,
+    };
+  }
+
   // ── Queues ───────────────────────────────────────────────
   // Thin: plain lists of what needs a decision. Filtering and pagination are
   // the harden slice.

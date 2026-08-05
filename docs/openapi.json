@@ -1699,6 +1699,63 @@
         ]
       }
     },
+    "/v1/admin/promoters/{id}/kyc": {
+      "post": {
+        "description": "Gates cash-out — a payout can only be approved once KYC is VERIFIED.",
+        "operationId": "AdminController_setKyc",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetKycDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Set a promoter’s KYC state (§10)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/live-campaigns": {
       "get": {
         "description": "The campaigns an admin can match promoters to.",
@@ -2326,6 +2383,128 @@
         ]
       }
     },
+    "/v1/admin/withdrawals/{id}/fail": {
+      "post": {
+        "description": "REQUESTED/APPROVED → FAILED. The balance is untouched — nothing was posted yet.",
+        "operationId": "AdminController_failWithdrawal",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Fail a not-yet-paid withdrawal (reason required)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/withdrawals/{id}/reverse": {
+      "post": {
+        "description": "DR BANK_CLEARING / CR PROMOTER_AVAILABLE — funds return to the promoter’s balance. Requires an Idempotency-Key.",
+        "operationId": "AdminController_reverseWithdrawal",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Reverse a paid withdrawal that bounced (reason required)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/reconciliation": {
       "get": {
         "description": "Per charge: campaign price vs gateway-reported vs the escrow credit the ledger holds. ledger_matches_gateway is the overall proof.",
@@ -2360,6 +2539,45 @@
           }
         ],
         "summary": "Reconcile gateway charges against the ledger",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/finance/exposure": {
+      "get": {
+        "description": "Money position by account kind + the payout obligation in flight. promoter_payable is fully backed by settled escrow — fully_backed proves it.",
+        "operationId": "AdminController_exposure",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExposureReportDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Platform exposure & payout liability (§10)",
         "tags": [
           "admin"
         ]
@@ -4767,6 +4985,24 @@
           "scores"
         ]
       },
+      "SetKycDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "PENDING",
+              "VERIFIED",
+              "REJECTED"
+            ],
+            "example": "VERIFIED"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
       "FundCampaignDto": {
         "type": "object",
         "properties": {
@@ -4965,6 +5201,73 @@
           "settled",
           "mismatched",
           "payments"
+        ]
+      },
+      "ExposureReportDto": {
+        "type": "object",
+        "properties": {
+          "promoter_payable": {
+            "description": "Total owed to promoters (Σ PROMOTER_AVAILABLE) — fully backed by settled escrow.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "in_flight_withdrawals": {
+            "description": "Requested/approved payouts not yet paid.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "escrow_held": {
+            "description": "Client funds committed to live campaigns (Σ CAMPAIGN_ESCROW).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "client_wallet": {
+            "description": "Refunded remainders sitting in client wallets.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "platform_revenue": {
+            "description": "Ralia’s cumulative take.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "bank_clearing_net": {
+            "description": "Net cash position (debits − credits on BANK_CLEARING).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "fully_backed": {
+            "type": "boolean",
+            "example": true,
+            "description": "Promoter obligations are never an unfunded promise."
+          }
+        },
+        "required": [
+          "promoter_payable",
+          "in_flight_withdrawals",
+          "escrow_held",
+          "client_wallet",
+          "platform_revenue",
+          "bank_clearing_net",
+          "fully_backed"
         ]
       },
       "SettleGatewayPaymentDto": {
@@ -5593,13 +5896,24 @@
             "type": "boolean",
             "example": true,
             "description": "False when the balance is below the minimum."
+          },
+          "kyc_status": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "PENDING",
+              "VERIFIED",
+              "REJECTED"
+            ],
+            "description": "KYC gate for payout — must be VERIFIED before a withdrawal is approved."
           }
         },
         "required": [
           "available",
           "pending_withdrawal",
           "withdrawal_minimum",
-          "can_withdraw"
+          "can_withdraw",
+          "kyc_status"
         ]
       },
       "WithdrawalDto": {

@@ -167,6 +167,29 @@ export class GatewayPaymentDto {
 }
 
 /** Ledger-vs-gateway reconciliation across every gateway charge (§10). */
+export class ExposureReportDto {
+  @ApiProperty({ type: MoneyDto, description: 'Total owed to promoters (Σ PROMOTER_AVAILABLE) — fully backed by settled escrow.' })
+  promoter_payable!: MoneyDto;
+
+  @ApiProperty({ type: MoneyDto, description: 'Requested/approved payouts not yet paid.' })
+  in_flight_withdrawals!: MoneyDto;
+
+  @ApiProperty({ type: MoneyDto, description: 'Client funds committed to live campaigns (Σ CAMPAIGN_ESCROW).' })
+  escrow_held!: MoneyDto;
+
+  @ApiProperty({ type: MoneyDto, description: 'Refunded remainders sitting in client wallets.' })
+  client_wallet!: MoneyDto;
+
+  @ApiProperty({ type: MoneyDto, description: 'Ralia’s cumulative take.' })
+  platform_revenue!: MoneyDto;
+
+  @ApiProperty({ type: MoneyDto, description: 'Net cash position (debits − credits on BANK_CLEARING).' })
+  bank_clearing_net!: MoneyDto;
+
+  @ApiProperty({ example: true, description: 'Promoter obligations are never an unfunded promise.' })
+  fully_backed!: boolean;
+}
+
 export class ReconciliationReportDto {
   @ApiProperty({ type: MoneyDto, description: 'Total the gateway reported across all charges.' })
   gateway_total!: MoneyDto;

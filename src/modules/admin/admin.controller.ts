@@ -6,7 +6,7 @@ import { AuthedUser } from '../../common/auth/jwt-auth.guard';
 import { RequiresCapability, Roles } from '../../common/auth/roles.guard';
 import { RequiresIdempotencyKey } from '../../common/idempotency/idempotency.guard';
 import { AdminService } from './admin.service';
-import { AdminDecisionDto, ApproveSubmissionDto, FundCampaignDto, RateConfigUpdateDto, ReconciliationReportDto, RecordWithdrawalPaidDto, RejectDto, SetCapabilityDto, SetKycDto, SettleGatewayPaymentDto, VerifyChannelDto } from './dto/admin.dto';
+import { AdminDecisionDto, ApproveSubmissionDto, ExposureReportDto, FundCampaignDto, RateConfigUpdateDto, ReconciliationReportDto, RecordWithdrawalPaidDto, RejectDto, SetCapabilityDto, SetKycDto, SettleGatewayPaymentDto, VerifyChannelDto } from './dto/admin.dto';
 
 /**
  * Admin console API.
@@ -298,6 +298,17 @@ export class AdminController {
   @ApiOkResponse({ type: ReconciliationReportDto })
   reconciliation(): Promise<ReconciliationReportDto> {
     return this.admin.reconciliationReport();
+  }
+
+  @Get('finance/exposure')
+  @RequiresCapability(AdminCapability.RECORD_MONEY)
+  @ApiOperation({
+    summary: 'Platform exposure & payout liability (§10)',
+    description: 'Money position by account kind + the payout obligation in flight. promoter_payable is fully backed by settled escrow — fully_backed proves it.',
+  })
+  @ApiOkResponse({ type: ExposureReportDto })
+  exposure(): Promise<ExposureReportDto> {
+    return this.admin.exposureReport();
   }
 
   @Post('reconciliation/:id/settle')

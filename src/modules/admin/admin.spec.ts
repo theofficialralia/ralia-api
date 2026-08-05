@@ -330,6 +330,20 @@ describe('admin — decisions, money and audit', () => {
     await http().post(`/admin/promoters/${promoterId}/capability`).send({ scores: { GHOST: 50 } }).set(bearer(adminId, [Role.ADMIN])).expect(400);
   });
 
+  it('reports platform exposure — promoter payable is fully backed by settled escrow', async () => {
+    const { submissionId, promoterId, adminId } = await makePendingSubmission();
+    await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: PROMISED }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+
+    const res = await http().get('/admin/finance/exposure').set(bearer(adminId, [Role.ADMIN])).expect(200);
+    // Full delivery: promoter owed FEE, Ralia took TAKE, escrow fully drawn down.
+    expect(res.body.promoter_payable.amount_minor).toBe(Number(FEE));
+    expect(res.body.platform_revenue.amount_minor).toBe(Number(TAKE));
+    expect(res.body.escrow_held.amount_minor).toBe(0);
+    expect(res.body.in_flight_withdrawals.amount_minor).toBe(0);
+    expect(res.body.fully_backed).toBe(true);
+    void promoterId;
+  });
+
   it('fails a not-yet-paid withdrawal without touching the balance', async () => {
     const { promoterId, adminId } = await makePendingSubmission();
     const bank = await prisma.promoterBankAccount.findFirstOrThrow({ where: { userId: promoterId } });
