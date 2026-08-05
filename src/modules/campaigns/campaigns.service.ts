@@ -17,6 +17,7 @@ import {
 import { toMoney } from '../ledger/money';
 import {
   CampaignDto,
+  CampaignPlanDto,
   CreateCampaignDto,
   QuoteDto,
   SetTargetingDto,
@@ -216,6 +217,56 @@ export class CampaignsService {
       estimated_reach: reach,
       eligible_promoters: count,
       active_filters: activeFilterCount(filters),
+    };
+  }
+
+  /**
+   * Stateless pricing preview for the budget↔reach slider — persists nothing. Given a
+   * budget it solves how many slots that buys at current targeting (and thus the total
+   * reach); given a slot count it prices that many directly. The client drags the
+   * slider against this, then commits via update(slots_total) + quote().
+   */
+  async plan(
+    userId: string,
+    campaignId: string,
+    driver: { budgetMinor?: number; slots?: number },
+  ): Promise<CampaignPlanDto> {
+    const campaign = await this.ownedCampaign(userId, campaignId);
+    this.assertEditable(campaign);
+
+    const targeting = await this.prisma.campaignTargeting.findUnique({ where: { campaignId } });
+    const filters = targeting ? toFilters(targeting) : NO_FILTERS;
+    if (filters.minEffectiveReach <= 0) {
+      throw new BadRequestException(
+        'Set a minimum effective reach in targeting first — it is the per-slot basis the plan prices on.',
+      );
+    }
+
+    const config = await this.rateConfig.getPricingConfig();
+    const unitPrice = slotPriceMinor(filters.minEffectiveReach, campaign.objective, filters, config);
+
+    // Budget wins if both are given: floor(budget / unit) slots. A budget below one
+    // slot yields zero — the UI shows "raise your budget". Otherwise price the slots.
+    let slots: number;
+    if (driver.budgetMinor !== undefined) {
+      slots = unitPrice > 0n ? Number(BigInt(driver.budgetMinor) / unitPrice) : 0;
+    } else if (driver.slots !== undefined) {
+      slots = driver.slots;
+    } else {
+      slots = campaign.slotsTotal;
+    }
+    slots = Math.min(Math.max(slots, 0), 10000);
+
+    const totalPrice = unitPrice * BigInt(slots);
+    const { promoterFeeMinor } = splitFee(unitPrice, config);
+
+    return {
+      unit_price: toMoney(unitPrice),
+      slots,
+      total_price: toMoney(totalPrice),
+      promoter_fee: toMoney(promoterFeeMinor),
+      reach_per_slot: filters.minEffectiveReach,
+      estimated_total_reach: slots * filters.minEffectiveReach,
     };
   }
 

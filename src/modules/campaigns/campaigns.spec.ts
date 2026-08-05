@@ -194,6 +194,30 @@ describe('campaigns — draft, targeting, pricing', () => {
     expect(after.body.quoted_at).not.toBeNull();
   });
 
+  it('plans budget↔reach without persisting anything', async () => {
+    const id = await createDraft({ objective: CampaignObjective.AWARENESS, slots_total: 10 });
+    await http().put(`/campaigns/${id}/targeting`).set(auth())
+      .send({ states: ['Lagos'], platforms: ['INSTAGRAM'], min_effective_reach: 1000 })
+      .expect(200);
+
+    // unit = 3450 (as above). Budget 20000 → floor(20000/3450) = 5 slots, reach 5×1000.
+    const byBudget = await http().post(`/campaigns/${id}/plan`).set(auth()).send({ budget_minor: 20000 }).expect(200);
+    expect(byBudget.body.unit_price.amount_minor).toBe(3450);
+    expect(byBudget.body.slots).toBe(5);
+    expect(byBudget.body.total_price.amount_minor).toBe(17250);
+    expect(byBudget.body.estimated_total_reach).toBe(5000);
+
+    // Driving by slots prices them directly.
+    const bySlots = await http().post(`/campaigns/${id}/plan`).set(auth()).send({ slots: 8 }).expect(200);
+    expect(bySlots.body.total_price.amount_minor).toBe(27600);
+    expect(bySlots.body.estimated_total_reach).toBe(8000);
+
+    // The preview persisted nothing: the campaign is still an unpriced DRAFT.
+    const after = await http().get(`/campaigns/${id}`).set(auth()).expect(200);
+    expect(after.body.status).toBe(CampaignStatus.DRAFT);
+    expect(after.body.price).toBeNull();
+  });
+
   it('a rate_config change never reprices a quoted campaign', async () => {
     await seedPromoters(3);
     const id = await createDraft({ slots_total: 5 });

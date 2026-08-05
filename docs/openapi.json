@@ -1083,6 +1083,63 @@
         ]
       }
     },
+    "/v1/campaigns/{id}/plan": {
+      "post": {
+        "description": "Stateless budget↔reach preview — solves slots/reach for a budget (or prices a slot count). Persists nothing; use it to drive the slider, then quote to commit.",
+        "operationId": "CampaignsController_plan",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignPlanDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Preview price for a budget or slot count",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
     "/v1/campaigns/{id}/submit": {
       "post": {
         "operationId": "CampaignsController_submit",
@@ -4481,6 +4538,73 @@
           "estimated_reach",
           "eligible_promoters",
           "active_filters"
+        ]
+      },
+      "PlanRequestDto": {
+        "type": "object",
+        "properties": {
+          "budget_minor": {
+            "type": "number",
+            "example": 500000,
+            "description": "Budget in kobo — solves for how many slots it buys."
+          },
+          "slots": {
+            "type": "number",
+            "example": 12,
+            "description": "Slot count — prices that many slots directly."
+          }
+        }
+      },
+      "CampaignPlanDto": {
+        "type": "object",
+        "properties": {
+          "unit_price": {
+            "description": "Per-slot price at current targeting.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "slots": {
+            "type": "number",
+            "example": 12,
+            "description": "Slots this plan buys."
+          },
+          "total_price": {
+            "description": "Total price = unit_price × slots.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "promoter_fee": {
+            "description": "What one promoter earns per slot.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "reach_per_slot": {
+            "type": "number",
+            "example": 2000,
+            "description": "Per-slot reach basis (targeting.min_effective_reach)."
+          },
+          "estimated_total_reach": {
+            "type": "number",
+            "example": 24000,
+            "description": "Estimated total reach = slots × reach_per_slot."
+          }
+        },
+        "required": [
+          "unit_price",
+          "slots",
+          "total_price",
+          "promoter_fee",
+          "reach_per_slot",
+          "estimated_total_reach"
         ]
       },
       "ClientProfileDto": {

@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -29,7 +31,9 @@ import { CampaignsService } from './campaigns.service';
 import {
   AssetMetaDto,
   CampaignDto,
+  CampaignPlanDto,
   CreateCampaignDto,
+  PlanRequestDto,
   QuoteDto,
   SetTargetingDto,
   UpdateCampaignDto,
@@ -97,6 +101,21 @@ export class CampaignsController {
   @ApiOkResponse({ type: QuoteDto })
   quote(@CurrentUser() user: AuthedUser, @Param('id', ParseUUIDPipe) id: string): Promise<QuoteDto> {
     return this.campaigns.quote(user.id, id);
+  }
+
+  @Post(':id/plan')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Preview price for a budget or slot count',
+    description: 'Stateless budget↔reach preview — solves slots/reach for a budget (or prices a slot count). Persists nothing; use it to drive the slider, then quote to commit.',
+  })
+  @ApiOkResponse({ type: CampaignPlanDto })
+  plan(
+    @CurrentUser() user: AuthedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: PlanRequestDto,
+  ): Promise<CampaignPlanDto> {
+    return this.campaigns.plan(user.id, id, { budgetMinor: dto.budget_minor, slots: dto.slots });
   }
 
   @Post(':id/submit')

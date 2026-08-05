@@ -223,6 +223,45 @@ export class CampaignDto {
   quoted_at!: string | null;
 }
 
+/** Drive a stateless quote preview by a budget or a slot count (budget wins if both given). */
+export class PlanRequestDto {
+  @ApiPropertyOptional({ example: 500000, description: 'Budget in kobo — solves for how many slots it buys.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  budget_minor?: number;
+
+  @ApiPropertyOptional({ example: 12, description: 'Slot count — prices that many slots directly.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(10000)
+  slots?: number;
+}
+
+/** Read-only pricing preview for the budget↔reach slider — persists nothing. */
+export class CampaignPlanDto {
+  @ApiProperty({ type: MoneyDto, description: 'Per-slot price at current targeting.' })
+  unit_price!: MoneyDto;
+
+  @ApiProperty({ example: 12, description: 'Slots this plan buys.' })
+  slots!: number;
+
+  @ApiProperty({ type: MoneyDto, description: 'Total price = unit_price × slots.' })
+  total_price!: MoneyDto;
+
+  @ApiProperty({ type: MoneyDto, description: 'What one promoter earns per slot.' })
+  promoter_fee!: MoneyDto;
+
+  @ApiProperty({ example: 2000, description: 'Per-slot reach basis (targeting.min_effective_reach).' })
+  reach_per_slot!: number;
+
+  @ApiProperty({ example: 24000, description: 'Estimated total reach = slots × reach_per_slot.' })
+  estimated_total_reach!: number;
+}
+
 export class QuoteDto {
   @ApiProperty({ type: MoneyDto, description: 'Total campaign price = Σ slot prices.' })
   price!: MoneyDto;
