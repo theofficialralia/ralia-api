@@ -23,20 +23,20 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigModule } from '../../common/rate-config/rate-config.module';
 import { StorageModule } from '../../common/storage/storage.module';
 import { IdentityModule } from '../identity/identity.module';
-import { OTP_PROVIDER, OtpProvider } from '../identity/providers/otp-provider';
+import { OTP_PROVIDER, OtpProvider, OtpRecipient } from '../identity/providers/otp-provider';
 import { computeEffectiveReach } from '../../common/reach/effective-reach';
 import { CampaignsModule } from './campaigns.module';
 import { testPrisma } from '../../../test/test-db';
 
 class CapturingOtpProvider implements OtpProvider {
   readonly name = 'capturing';
-  readonly sent: { to: string; code: string }[] = [];
-  async send(to: string, code: string, _p: OtpPurpose): Promise<void> {
+  readonly sent: { to: OtpRecipient; code: string }[] = [];
+  async send(to: OtpRecipient, code: string, _p: OtpPurpose): Promise<void> {
     this.sent.push({ to, code });
   }
-  last(to: string): string {
-    const f = [...this.sent].reverse().find((s) => s.to === to);
-    if (!f) throw new Error(`no OTP to ${to}`);
+  last(phone: string): string {
+    const f = [...this.sent].reverse().find((s) => s.to.phone === phone);
+    if (!f) throw new Error(`no OTP to ${phone}`);
     return f.code;
   }
 }

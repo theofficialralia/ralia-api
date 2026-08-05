@@ -43,7 +43,10 @@ export class OtpService {
       });
     });
 
-    await this.provider.send(phone, code, purpose);
+    // The email address is a delivery channel's contact point — the code itself is
+    // the same whichever channel carries it.
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    await this.provider.send({ phone, email: user?.email ?? null }, code, purpose);
   }
 
   /**

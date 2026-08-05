@@ -10,7 +10,7 @@ import { RolesGuard } from '../../common/auth/roles.guard';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { IdentityModule } from './identity.module';
-import { OTP_PROVIDER, OtpProvider } from './providers/otp-provider';
+import { OTP_PROVIDER, OtpProvider, OtpRecipient } from './providers/otp-provider';
 import { testPrisma } from '../../../test/test-db';
 
 /**
@@ -21,13 +21,13 @@ import { testPrisma } from '../../../test/test-db';
 /** Captures the code instead of sending it, so tests can read it. */
 class CapturingOtpProvider implements OtpProvider {
   readonly name = 'capturing';
-  readonly sent: { to: string; code: string; purpose: OtpPurpose }[] = [];
-  async send(to: string, code: string, purpose: OtpPurpose): Promise<void> {
+  readonly sent: { to: OtpRecipient; code: string; purpose: OtpPurpose }[] = [];
+  async send(to: OtpRecipient, code: string, purpose: OtpPurpose): Promise<void> {
     this.sent.push({ to, code, purpose });
   }
-  last(to: string): string {
-    const found = [...this.sent].reverse().find((s) => s.to === to);
-    if (!found) throw new Error(`No OTP was sent to ${to}`);
+  last(phone: string): string {
+    const found = [...this.sent].reverse().find((s) => s.to.phone === phone);
+    if (!found) throw new Error(`No OTP was sent to ${phone}`);
     return found.code;
   }
 }

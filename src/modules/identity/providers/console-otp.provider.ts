@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OtpPurpose } from '@prisma/client';
 import { appendFileSync } from 'node:fs';
-import { OtpProvider } from './otp-provider';
+import { OtpProvider, OtpRecipient } from './otp-provider';
 
 /**
  * Dev-only. Prints the code to the console so you can log in without an SMS
@@ -25,13 +25,14 @@ export class ConsoleOtpProvider implements OtpProvider {
     }
   }
 
-  async send(to: string, code: string, purpose: OtpPurpose): Promise<void> {
-    this.logger.log(`OTP for ${to} (${purpose}): ${code}`);
+  async send(to: OtpRecipient, code: string, purpose: OtpPurpose): Promise<void> {
+    this.logger.log(`OTP for ${to.phone} (${purpose}): ${code}`);
 
     const path = process.env.DEV_OTP_LOG;
     if (!path) return;
     try {
-      appendFileSync(path, `${to} ${purpose} ${code}\n`);
+      // Keyed by phone so the e2e harness (which knows the phone) can find the code.
+      appendFileSync(path, `${to.phone} ${purpose} ${code}\n`);
     } catch (err) {
       // Never fail a signup because a dev convenience file is unwritable.
       this.logger.warn(`Could not write ${path}: ${(err as Error).message}`);
