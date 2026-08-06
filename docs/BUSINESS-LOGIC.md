@@ -48,17 +48,17 @@ The beauty of this model: **Ralia never fronts money.** The client's money is he
 
 ---
 
-## 4. How a campaign is priced (so the number isn't arbitrary)
+## 4. Pricing — the key questions, answered
 
-A client never names a price — the engine calculates it, the same way every time, from what they ask for. Three ideas do all the work: the **RPM**, the **slot price**, and the **budget slider** that turns a budget into reach.
+A client never names a price — the engine calculates it, the same way every time, from what they ask for. Here are the three questions that come up most, answered in plain terms.
 
-### RPM — the base rate per 1,000 views
+### Q1 — What is RPM?
 
 **RPM = the price of a thousand pairs of eyeballs**, before any adjustments. ("RPM" = *rate per mille*; mille = thousand.) The default is **₦30 per 1,000 effective views**. It's a single dial we can turn to move every campaign's price at once — raise it to earn more per view, lower it to compete.
 
 Note *effective* views: RPM is always charged against **effective reach** (the honest, discounted number — see §5), never a promoter's claimed follower count.
 
-### Slot price — what one promoter's spot costs
+### Q2 — What is a "slot price"?
 
 A **slot** is one promoter's spot in a campaign. A campaign's total is simply *slot price × number of slots*.
 
@@ -77,7 +77,7 @@ slot price = (effective reach ÷ 1,000) × RPM × objective multiplier × target
 
 **Two prices to keep straight.** At **quote time** the slot is priced on the reach the *client asked for* (their minimum-effective-reach), so the figure is predictable and doesn't depend on who happens to be available. At **offer time**, each real promoter's slot is priced on *their own* effective reach and they're paid pro-rata on what they actually deliver.
 
-### How it's shown to the client — the budget↔reach slider
+### Q3 — How is the price shown to the client, and how does the slider recalculate?
 
 The client enters their requirements (objective, targeting, a per-slot reach floor, and how many promoters they want). From those, two things become **fixed** and do **not** move as they drag the slider:
 
