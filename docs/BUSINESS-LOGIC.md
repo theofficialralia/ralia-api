@@ -50,20 +50,61 @@ The beauty of this model: **Ralia never fronts money.** The client's money is he
 
 ## 4. How a campaign is priced (so the number isn't arbitrary)
 
-A client doesn't name a price — the engine calculates it, the same way every time, from what they ask for:
+A client never names a price — the engine calculates it, the same way every time, from what they ask for. Three ideas do all the work: the **RPM**, the **slot price**, and the **budget slider** that turns a budget into reach.
+
+### RPM — the base rate per 1,000 views
+
+**RPM = the price of a thousand pairs of eyeballs**, before any adjustments. ("RPM" = *rate per mille*; mille = thousand.) The default is **₦30 per 1,000 effective views**. It's a single dial we can turn to move every campaign's price at once — raise it to earn more per view, lower it to compete.
+
+Note *effective* views: RPM is always charged against **effective reach** (the honest, discounted number — see §5), never a promoter's claimed follower count.
+
+### Slot price — what one promoter's spot costs
+
+A **slot** is one promoter's spot in a campaign. A campaign's total is simply *slot price × number of slots*.
 
 ```
-slot price = (effective reach ÷ 1000) × RPM × objective multiplier × targeting multiplier
+slot price = (effective reach ÷ 1,000) × RPM × objective multiplier × targeting multiplier
 ```
 
-In plain terms — **you pay per 1,000 real views, and it costs more when you ask for more:**
+- **Objective multiplier** — a "get someone to buy" campaign is worth more than a "just be seen" one: Awareness ×1.0 · Website visit ×1.1 · App install ×1.25 · Lead ×1.4 · **Purchase ×1.5**.
+- **Targeting multiplier** — the tighter you target (states, ages, languages, categories), the more each slot costs, up to a cap. Precision is a premium.
 
-- **RPM** — the base rate per 1,000 effective views (default **₦30**).
-- **Objective multiplier** — a "get someone to buy" campaign is worth more than a "just be seen" one:
-  - Awareness ×1.0 · Website visit ×1.1 · App install ×1.25 · Lead ×1.4 · **Purchase ×1.5**
-- **Targeting multiplier** — the tighter you target (specific states, ages, languages, categories), the more each slot costs, up to a cap. Precision is a premium.
+> **Worked example.** Awareness (×1.0), with 3 targeting filters active (×1.15), where each slot must deliver at least **2,000** effective views:
+>
+> slot price = (2,000 ÷ 1,000) × ₦30 × 1.0 × 1.15 = **₦69 per slot**
+>
+> From that ₦69 the **promoter keeps ₦48.30 (70%)** and **Ralia keeps ₦20.70 (30%)**.
 
-A **campaign** is just a bundle of slots. The client sets a budget; the engine tells them how many promoters (slots) and how much total reach that budget buys — that's the **budget↔reach slider** in the client app. More budget → more slots → more reach.
+**Two prices to keep straight.** At **quote time** the slot is priced on the reach the *client asked for* (their minimum-effective-reach), so the figure is predictable and doesn't depend on who happens to be available. At **offer time**, each real promoter's slot is priced on *their own* effective reach and they're paid pro-rata on what they actually deliver.
+
+### How it's shown to the client — the budget↔reach slider
+
+The client enters their requirements (objective, targeting, a per-slot reach floor, and how many promoters they want). From those, two things become **fixed** and do **not** move as they drag the slider:
+
+- **Slot price** — ₦69 in the example.
+- **Reach per slot** — 2,000 in the example (their reach floor).
+
+The slider is a **budget dial.** Dragging it changes only **how many slots the budget can buy**, and reach follows from that:
+
+```
+slots = budget ÷ slot price     (rounded DOWN — you can't buy half a promoter)
+reach = slots × reach-per-slot
+total = slots × slot price       (what's charged; ≤ the slider value)
+```
+
+So the chain is **budget → number of slots → total reach.** More budget affords more slots, each adding another slot's worth of reach; less budget, fewer slots.
+
+| Budget dragged to | Slots it buys | Total reach | Price actually charged |
+|---|--:|--:|--:|
+| ₦1,000 | 14 | 28,000 | ₦966 |
+| ₦2,000 | 28 | 56,000 | ₦1,932 |
+| ₦5,000 | 72 | 144,000 | ₦4,968 |
+
+Two things to notice:
+- The charged total **snaps below** the slider value (₦2,000 → ₦1,932): the leftover that can't cover a whole extra slot is dropped, because a promoter is indivisible.
+- Reach therefore moves in **steps of one slot** (here, 2,000 views at a time), not smoothly.
+
+*Today the slider opens at the budget for the number of promoters the client entered. A **"Recommended budget"** — where Ralia suggests a sensible starting spend for the client's objective and targeting — is a planned **coming-soon** enhancement.*
 
 ---
 
