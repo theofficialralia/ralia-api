@@ -904,7 +904,7 @@ model RateConfig {
   multPurchase        Decimal @default(1.5) @map("mult_purchase") @db.Decimal(4, 2)
   targetingStep       Decimal @default(0.05) @map("targeting_step") @db.Decimal(4, 2)
   targetingCap        Decimal @default(1.35) @map("targeting_cap") @db.Decimal(4, 2)
-  takeRate            Decimal @default(0.30) @map("take_rate") @db.Decimal(4, 2)
+  takeRate            Decimal @default(0.50) @map("take_rate") @db.Decimal(4, 2)
   // τ — a delivery below this share of promised reach is rejected, not paid (§2).
   deliveryThresholdPct Int    @default(70) @map("delivery_threshold_pct")
   // §1 reach policy: the self-reported cap and the proof validity window.

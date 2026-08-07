@@ -183,8 +183,8 @@ describe('campaigns — draft, targeting, pricing', () => {
     expect(q.body.active_filters).toBe(3);
     expect(q.body.unit_price.amount_minor).toBe(3450);
     expect(q.body.price.amount_minor).toBe(34500);
-    // promoter keeps 70%: round(3450 × 0.7) = 2415
-    expect(q.body.promoter_fee.amount_minor).toBe(2415);
+    // promoter keeps 50%: round(3450 × 0.5) = 1725
+    expect(q.body.promoter_fee.amount_minor).toBe(1725);
     expect(q.body.eligible_promoters).toBe(5);
     expect(q.body.estimated_reach).toBeGreaterThan(0);
 

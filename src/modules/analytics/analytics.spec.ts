@@ -43,8 +43,8 @@ describe('analytics — campaign detail and dashboard', () => {
   let seq = 0;
 
   const UNIT = 3450n;
-  const FEE = 2415n;
-  const TAKE = 1035n;
+  const FEE = 1725n;
+  const TAKE = 1725n;
 
   beforeAll(async () => {
     process.env.JWT_ACCESS_SECRET ??= 'test_access_secret';

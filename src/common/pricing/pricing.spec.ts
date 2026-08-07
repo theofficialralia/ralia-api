@@ -16,7 +16,7 @@ import {
  * implementation.
  *
  *   slot_price = (effective_reach / 1000) × RPM × objective_mult × targeting_mult
- *   RPM = 3000 kobo | take_rate = 0.30
+ *   RPM = 3000 kobo | take_rate = 0.50
  */
 const CONFIG: PricingConfig = {
   rpmMinor: 3000,
@@ -29,7 +29,7 @@ const CONFIG: PricingConfig = {
   },
   targetingStepHundredths: 5,
   targetingCapHundredths: 135,
-  takeRateHundredths: 30,
+  takeRateHundredths: 50,
 };
 
 const NO_FILTERS: TargetingFilters = {
@@ -94,10 +94,10 @@ describe('pricing (§5.2)', () => {
   });
 
   describe('fee split', () => {
-    it('promoter keeps 70%, Ralia takes 30%', () => {
+    it('promoter keeps 50%, Ralia takes 50%', () => {
       const { promoterFeeMinor, raliaTakeMinor } = splitFee(3000n, CONFIG);
-      expect(promoterFeeMinor).toBe(2100n);
-      expect(raliaTakeMinor).toBe(900n);
+      expect(promoterFeeMinor).toBe(1500n);
+      expect(raliaTakeMinor).toBe(1500n);
     });
 
     it('fee + take is exactly the slot price, for every price up to 100k kobo', () => {
@@ -112,24 +112,24 @@ describe('pricing (§5.2)', () => {
     });
 
     it('handles an odd price without losing a kobo', () => {
-      // 4501 × 0.7 = 3150.7 → 3151; take = 4501 − 3151 = 1350
+      // 4501 × 0.5 = 2250.5 → 2251; take = 4501 − 2251 = 2250
       const { promoterFeeMinor, raliaTakeMinor } = splitFee(4501n, CONFIG);
-      expect(promoterFeeMinor).toBe(3151n);
-      expect(raliaTakeMinor).toBe(1350n);
+      expect(promoterFeeMinor).toBe(2251n);
+      expect(raliaTakeMinor).toBe(2250n);
       expect(promoterFeeMinor + raliaTakeMinor).toBe(4501n);
     });
   });
 
   describe('pro-rata settlement (§2)', () => {
-    // gross 3000 kobo (awareness, 1000 reach), τ = 70%, take 30%.
-    const SETTLE: SettlementConfig = { takeRateHundredths: 30, deliveryThresholdPct: 70 };
+    // gross 3000 kobo (awareness, 1000 reach), τ = 70%, take 50%.
+    const SETTLE: SettlementConfig = { takeRateHundredths: 50, deliveryThresholdPct: 70 };
 
     it('full delivery pays the whole fee, refunds nothing', () => {
       const s = settleDelivery(3000n, 1000, 1000, SETTLE);
       expect(s.meetsThreshold).toBe(true);
       expect(s.deliveredGrossMinor).toBe(3000n);
-      expect(s.promoterFeeMinor).toBe(2100n);
-      expect(s.raliaTakeMinor).toBe(900n);
+      expect(s.promoterFeeMinor).toBe(1500n);
+      expect(s.raliaTakeMinor).toBe(1500n);
       expect(s.refundMinor).toBe(0n);
     });
 
@@ -145,8 +145,8 @@ describe('pricing (§5.2)', () => {
       const s = settleDelivery(3000n, 800, 1000, SETTLE);
       expect(s.meetsThreshold).toBe(true);
       expect(s.deliveredGrossMinor).toBe(2400n);
-      expect(s.promoterFeeMinor).toBe(1680n); // 2400 × 0.7
-      expect(s.raliaTakeMinor).toBe(720n);
+      expect(s.promoterFeeMinor).toBe(1200n); // 2400 × 0.5
+      expect(s.raliaTakeMinor).toBe(1200n);
       expect(s.refundMinor).toBe(600n); // 3000 − 2400
     });
 
@@ -170,11 +170,11 @@ describe('pricing (§5.2)', () => {
 
     it('rounds without losing a kobo (odd gross, odd ratio)', () => {
       // delivered_gross = round(4501 × 777 / 1000) = round(3497.277) = 3497
-      // fee = round(3497 × 0.7) = 2448, take = 1049, refund = 4501 − 3497 = 1004
+      // fee = round(3497 × 0.5) = round(1748.5) = 1749, take = 1748, refund = 4501 − 3497 = 1004
       const s = settleDelivery(4501n, 777, 1000, SETTLE);
       expect(s.deliveredGrossMinor).toBe(3497n);
-      expect(s.promoterFeeMinor).toBe(2448n);
-      expect(s.raliaTakeMinor).toBe(1049n);
+      expect(s.promoterFeeMinor).toBe(1749n);
+      expect(s.raliaTakeMinor).toBe(1748n);
       expect(s.refundMinor).toBe(1004n);
     });
 

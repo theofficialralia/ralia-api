@@ -47,8 +47,8 @@ describe('admin — decisions, money and audit', () => {
   let seq = 0;
 
   const UNIT_PRICE = 3450n; // slot price
-  const FEE = 2415n; // promoter's 70%
-  const TAKE = 1035n; // Ralia's 30% — fee + take must equal UNIT_PRICE
+  const FEE = 1725n; // promoter's 50%
+  const TAKE = 1725n; // Ralia's 50% — fee + take must equal UNIT_PRICE
   const PROMISED = 1000; // promised effective reach; approving with verified = PROMISED is a full delivery (refund 0)
 
   beforeAll(async () => {
@@ -257,11 +257,11 @@ describe('admin — decisions, money and audit', () => {
     const escrow = await prisma.account.findFirstOrThrow({ where: { kind: AccountKind.CAMPAIGN_ESCROW } });
 
     // promised 1000, verified 800 (≥ 70%). delivered_gross = 3450×800/1000 = 2760;
-    // fee = round(2760×0.7) = 1932, take = 828, refund = 3450 − 2760 = 690.
+    // fee = round(2760×0.5) = 1380, take = 1380, refund = 3450 − 2760 = 690.
     await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: 800 }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
 
-    expect(await balanceOf(AccountKind.PROMOTER_AVAILABLE, promoterId)).toBe(1932n);
-    expect(await balanceOf(AccountKind.RALIA_REVENUE)).toBe(828n);
+    expect(await balanceOf(AccountKind.PROMOTER_AVAILABLE, promoterId)).toBe(1380n);
+    expect(await balanceOf(AccountKind.RALIA_REVENUE)).toBe(1380n);
     expect(await balanceOf(AccountKind.CLIENT_WALLET, campaign.clientOrgId)).toBe(690n); // refund
     expect(await balanceOfAccount(escrow.id, AccountKind.CAMPAIGN_ESCROW)).toBe(0n); // 2760 + 690 = 3450
 
@@ -770,7 +770,7 @@ describe('admin — decisions, money and audit', () => {
   it('reads and updates platform rules, and audits the change', async () => {
     const adminId = await makeAdmin();
     const before = await http().get('/admin/rate-config').set(bearer(adminId, [Role.ADMIN])).expect(200);
-    expect(before.body.take_rate_pct).toBe(30);
+    expect(before.body.take_rate_pct).toBe(50);
 
     const after = await http().patch('/admin/rate-config').set(bearer(adminId, [Role.ADMIN])).send({ take_rate_pct: 25, delivery_threshold_pct: 60 }).expect(200);
     expect(after.body.take_rate_pct).toBe(25);
