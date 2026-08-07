@@ -23,10 +23,11 @@ export function categoryForRole(role: PromoterRole): CampaignCategory {
  * Deterministic pricing — handoff §5.2.
  *
  *   slot_price   = (effective_reach / 1000) × RPM × objective_mult × targeting_mult
- *   RPM          = kobo per 1000 views (config)
+ *   RPM          = kobo per 1000 views, chosen per campaign category — Distribution
+ *                  vs Creation (config; see RateConfigService.getPricingConfig)
  *   targeting_mult = 1 + step × (active filter count), capped
- *   promoter_fee = slot_price × (1 − take_rate)
- *   campaign_price = Σ slot_price
+ *   promoter_fee = slot_price × (1 − take_rate)     take_rate = 0.50 (config, 50/50 split)
+ *   campaign_price = Σ slot_price, and must clear the category's minimum floor
  *
  * Everything is integer kobo. The multipliers are Decimal(4,2) in rate_config,
  * so they are exact in hundredths; the whole computation runs in BigInt and

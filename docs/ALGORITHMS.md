@@ -34,16 +34,28 @@ eff_reach = round(basis × platform_factor × verification_factor)
 
 ```
 slot_price          = (eff_reach / 1000) × RPM × objective_mult × targeting_mult   [knob: RPM, mults]
-promoter_fee_ceiling = slot_price × (1 − take_rate)                                 take_rate = 0.30 [knob]
+promoter_fee_ceiling = slot_price × (1 − take_rate)                                 take_rate = 0.50 [knob]
 ```
 
-**Quote — reach-goal anchored** `[new]`. Client enters a target reach `R_goal`:
+**RPM is per-category** `[built]`. A campaign's category is derived from its slot role —
+Distributor/Influencer → **Distribution**, Creator/Participator → **Creation/Participation** —
+and each category carries its own RPM (defaults: Distribution ₦3,000/1,000 = 300,000 kobo,
+Creation ₦500/1,000 = 50,000 kobo). The legacy flat `RPM` remains only as a no-category fallback.
+
+**Category floor** `[built]`. Each category has a minimum campaign fee (defaults: Distribution
+₦15,000, Creation ₦100,000). `quote()` rejects any campaign whose total is below its floor; the
+category also carries default reach-per-slot and promoter counts the wizard pre-fills.
+
+**Quote — budget↔reach slider** `[built]`. `plan()` prices at the category RPM and returns the
+floor, the minimum slot count that meets it, and the category defaults:
 ```
-recommended_budget = (R_goal / 1000) × RPM × objective_mult × targeting_mult   (capped at eligible-pool max-reach cost)
-floor              = max(min_campaign_fund, one slot_price)
-projected_reach(b) = 1000 × b / (RPM × objective_mult × targeting_mult)         (capped at pool max)
+slots              = floor(budget / slot_price)                                  (whole slots only)
+min_slots          = ceil(category_floor / slot_price)
+projected_reach(b) = slots × reach_per_slot
 ```
-Budget and reach are inverses — the slider moves `b` in `[floor, cap]` and reach updates live.
+Budget and reach are inverses — the slider moves `b` in `[min_slots × slot_price, cap]` (it cannot
+go below the category floor) and reach updates live. (A "recommended budget" above the floor is a
+planned enhancement.)
 
 **Payment — pro-rata with delivery floor** `[new]`:
 ```
