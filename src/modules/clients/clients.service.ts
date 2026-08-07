@@ -3,7 +3,7 @@ import { CampaignStatus, ClientOrg, ClientOrgStatus, Prisma } from '@prisma/clie
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { AuditService } from '../admin/audit.service';
-import { ClientProfileDto, UpdateClientProfileDto } from './dto/client-profile.dto';
+import { ClientProfileDto, ClientSocialDto, UpdateClientProfileDto } from './dto/client-profile.dto';
 
 /** Campaign states where money or promoter work is still in flight. */
 const ACTIVE_STATES: CampaignStatus[] = [
@@ -52,9 +52,7 @@ export class ClientsService {
     if (dto.support_contact_name !== undefined) data.supportContactName = dto.support_contact_name;
     if (dto.support_contact_phone !== undefined) data.supportContactPhone = dto.support_contact_phone;
     if (dto.description !== undefined) data.description = dto.description;
-    if (dto.social_platform !== undefined) data.socialPlatform = dto.social_platform;
-    if (dto.social_url !== undefined) data.socialUrl = dto.social_url;
-    if (dto.social_followers !== undefined) data.socialFollowers = dto.social_followers;
+    if (dto.socials !== undefined) data.socials = dto.socials as unknown as Prisma.InputJsonValue;
 
     const updated = await this.prisma.clientOrg.update({ where: { id: org.id }, data });
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } });
@@ -140,9 +138,7 @@ function toDto(org: ClientOrg, email: string): ClientProfileDto {
     support_contact_name: org.supportContactName,
     support_contact_phone: org.supportContactPhone,
     description: org.description,
-    social_platform: org.socialPlatform,
-    social_url: org.socialUrl,
-    social_followers: org.socialFollowers,
+    socials: (org.socials as unknown as ClientSocialDto[] | null) ?? null,
     status: org.status,
   };
 }

@@ -184,11 +184,11 @@ model ClientOrg {
   supportContactName   String? @map("support_contact_name")
   supportContactPhone  String? @map("support_contact_phone")
   description          String?
-  // Primary social presence captured at org setup (shown to promoters as the
-  // campaign owner). Platform is a free string matching the Platform enum values.
-  socialPlatform       String? @map("social_platform")
-  socialUrl            String? @map("social_url")
-  socialFollowers      Int?    @map("social_followers")
+  // Social presence captured at org setup (shown to promoters as the campaign
+  // owner). An array of { platform, url?, followers? } — one entry per platform
+  // the business selects. JSON keeps the set flexible without a child table for
+  // what is light, optional profile data.
+  socials              Json?   @map("socials")
 
   createdAt     DateTime        @default(now()) @map("created_at")
   updatedAt     DateTime        @updatedAt @map("updated_at")

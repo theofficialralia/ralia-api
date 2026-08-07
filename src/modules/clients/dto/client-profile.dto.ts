@@ -1,8 +1,33 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Matches, MaxLength, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
+
+/** One social channel the business is present on. */
+export class ClientSocialDto {
+  @ApiProperty({ example: 'INSTAGRAM', description: 'Platform key (e.g. WHATSAPP, INSTAGRAM, X, TIKTOK, FACEBOOK).' })
+  @IsString() @MaxLength(30) @Transform(trim)
+  platform!: string;
+
+  @ApiPropertyOptional({ example: 'instagram.com/skinsmith' })
+  @IsOptional() @IsString() @MaxLength(200) @Transform(trim)
+  url?: string;
+
+  @ApiPropertyOptional({ example: 4200 })
+  @IsOptional() @IsInt() @Min(0)
+  followers?: number;
+}
 
 export class UpdateClientProfileDto {
   @ApiPropertyOptional({ example: 'Skinsmith Ltd' })
@@ -41,17 +66,9 @@ export class UpdateClientProfileDto {
   @IsOptional() @IsString() @MaxLength(1000) @Transform(trim)
   description?: string;
 
-  @ApiPropertyOptional({ example: 'INSTAGRAM', description: 'Primary social platform (Platform enum value).' })
-  @IsOptional() @IsString() @MaxLength(30) @Transform(trim)
-  social_platform?: string;
-
-  @ApiPropertyOptional({ example: 'instagram.com/skinsmith' })
-  @IsOptional() @IsString() @MaxLength(200) @Transform(trim)
-  social_url?: string;
-
-  @ApiPropertyOptional({ example: 4200, description: 'Follower/subscriber count on the primary social.' })
-  @IsOptional() @IsInt() @Min(0)
-  social_followers?: number;
+  @ApiPropertyOptional({ type: [ClientSocialDto], description: 'Social channels the business is on.' })
+  @IsOptional() @IsArray() @ArrayMaxSize(10) @ValidateNested({ each: true }) @Type(() => ClientSocialDto)
+  socials?: ClientSocialDto[];
 }
 
 export class ClientProfileDto {
@@ -88,14 +105,8 @@ export class ClientProfileDto {
   @ApiProperty({ nullable: true })
   description!: string | null;
 
-  @ApiProperty({ nullable: true })
-  social_platform!: string | null;
-
-  @ApiProperty({ nullable: true })
-  social_url!: string | null;
-
-  @ApiProperty({ nullable: true })
-  social_followers!: number | null;
+  @ApiProperty({ type: [ClientSocialDto], nullable: true })
+  socials!: ClientSocialDto[] | null;
 
   @ApiProperty({ example: 'ACTIVE' })
   status!: string;
