@@ -1306,6 +1306,14 @@ export class AdminService {
     const c = await this.rateConfig.getActive();
     return {
       rpm_minor: c.rpmMinor,
+      rpm_distribution_minor: c.rpmDistributionMinor,
+      rpm_creation_minor: c.rpmCreationMinor,
+      floor_distribution_minor: Number(c.floorDistributionMinor),
+      floor_creation_minor: Number(c.floorCreationMinor),
+      default_reach_distribution: c.defaultReachDistribution,
+      default_reach_creation: c.defaultReachCreation,
+      default_promoters_distribution: c.defaultPromotersDistribution,
+      default_promoters_creation: c.defaultPromotersCreation,
       take_rate_pct: Math.round(c.takeRate.toNumber() * 100),
       delivery_threshold_pct: c.deliveryThresholdPct,
       unverified_reach_cap: c.unverifiedReachCap,
@@ -1320,6 +1328,14 @@ export class AdminService {
     const c = await this.rateConfig.getActive();
     const data: Prisma.RateConfigUpdateInput = {};
     if (dto.rpm_minor !== undefined) data.rpmMinor = dto.rpm_minor;
+    if (dto.rpm_distribution_minor !== undefined) data.rpmDistributionMinor = dto.rpm_distribution_minor;
+    if (dto.rpm_creation_minor !== undefined) data.rpmCreationMinor = dto.rpm_creation_minor;
+    if (dto.floor_distribution_minor !== undefined) data.floorDistributionMinor = BigInt(dto.floor_distribution_minor);
+    if (dto.floor_creation_minor !== undefined) data.floorCreationMinor = BigInt(dto.floor_creation_minor);
+    if (dto.default_reach_distribution !== undefined) data.defaultReachDistribution = dto.default_reach_distribution;
+    if (dto.default_reach_creation !== undefined) data.defaultReachCreation = dto.default_reach_creation;
+    if (dto.default_promoters_distribution !== undefined) data.defaultPromotersDistribution = dto.default_promoters_distribution;
+    if (dto.default_promoters_creation !== undefined) data.defaultPromotersCreation = dto.default_promoters_creation;
     if (dto.take_rate_pct !== undefined) data.takeRate = new Prisma.Decimal(dto.take_rate_pct / 100);
     if (dto.delivery_threshold_pct !== undefined) data.deliveryThresholdPct = dto.delivery_threshold_pct;
     if (dto.unverified_reach_cap !== undefined) data.unverifiedReachCap = dto.unverified_reach_cap;

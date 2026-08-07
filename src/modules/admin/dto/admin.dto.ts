@@ -229,11 +229,43 @@ export class SettleGatewayPaymentDto {
 
 /** Editable platform knobs (§ ALGORITHMS). All optional — only sent fields change. */
 export class RateConfigUpdateDto {
-  @ApiPropertyOptional({ example: 3000, description: 'RPM — kobo per 1,000 effective views.' })
+  @ApiPropertyOptional({ example: 3000, description: 'Legacy flat RPM — kobo per 1,000 effective views (fallback).' })
   @IsOptional() @IsInt() @Min(0)
   rpm_minor?: number;
 
-  @ApiPropertyOptional({ example: 30, description: 'Ralia take rate, whole percent.' })
+  @ApiPropertyOptional({ example: 300000, description: 'Distribution RPM — kobo per 1,000 effective views.' })
+  @IsOptional() @IsInt() @Min(0)
+  rpm_distribution_minor?: number;
+
+  @ApiPropertyOptional({ example: 50000, description: 'Creation/Participation RPM — kobo per 1,000 effective views.' })
+  @IsOptional() @IsInt() @Min(0)
+  rpm_creation_minor?: number;
+
+  @ApiPropertyOptional({ example: 1500000, description: 'Distribution minimum campaign fee, kobo.' })
+  @IsOptional() @IsInt() @Min(0)
+  floor_distribution_minor?: number;
+
+  @ApiPropertyOptional({ example: 10000000, description: 'Creation/Participation minimum campaign fee, kobo.' })
+  @IsOptional() @IsInt() @Min(0)
+  floor_creation_minor?: number;
+
+  @ApiPropertyOptional({ example: 1000, description: 'Distribution default reach per slot.' })
+  @IsOptional() @IsInt() @Min(1)
+  default_reach_distribution?: number;
+
+  @ApiPropertyOptional({ example: 10000, description: 'Creation/Participation default reach per slot.' })
+  @IsOptional() @IsInt() @Min(1)
+  default_reach_creation?: number;
+
+  @ApiPropertyOptional({ example: 5, description: 'Distribution default promoter count.' })
+  @IsOptional() @IsInt() @Min(1)
+  default_promoters_distribution?: number;
+
+  @ApiPropertyOptional({ example: 20, description: 'Creation/Participation default promoter count.' })
+  @IsOptional() @IsInt() @Min(1)
+  default_promoters_creation?: number;
+
+  @ApiPropertyOptional({ example: 50, description: 'Ralia take rate, whole percent.' })
   @IsOptional() @IsInt() @Min(0) @Max(90)
   take_rate_pct?: number;
 
