@@ -4,12 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Campaign, CampaignStatus, Prisma } from '@prisma/client';
+import { Campaign, CampaignStatus, Prisma, PromoterRole } from '@prisma/client';
 import { buildEligibility } from '../../common/eligibility/eligibility';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
 import {
   activeFilterCount,
+  CampaignCategory,
+  categoryForRole,
   slotPriceMinor,
   splitFee,
   TargetingFilters,
@@ -183,9 +185,22 @@ export class CampaignsService {
       );
     }
 
-    const config = await this.rateConfig.getPricingConfig();
+    const category = this.categoryOf(filters);
+    const config = await this.rateConfig.getPricingConfig(category);
     const unitPrice = slotPriceMinor(filters.minEffectiveReach, campaign.objective, filters, config);
     const totalPrice = unitPrice * BigInt(campaign.slotsTotal);
+
+    // Category floor (governing logic #2): a campaign cannot be booked below its
+    // category's minimum fee. Enforced here, at the commit point, not in plan().
+    const floorMinor = await this.rateConfig.getCategoryFloorMinor(category);
+    if (totalPrice < floorMinor) {
+      throw new BadRequestException(
+        `A ${categoryLabel(category)} campaign must be at least ${formatNaira(floorMinor)}. ` +
+          `At ${campaign.slotsTotal} slot(s) × ${filters.minEffectiveReach} reach this prices to ` +
+          `${formatNaira(totalPrice)} — raise the slot count or the reach per slot.`,
+      );
+    }
+
     const { promoterFeeMinor } = splitFee(unitPrice, config);
 
     const { count, reach } = await this.estimateEligible(filters);
@@ -247,7 +262,8 @@ export class CampaignsService {
       );
     }
 
-    const config = await this.rateConfig.getPricingConfig();
+    const category = this.categoryOf(filters);
+    const config = await this.rateConfig.getPricingConfig(category);
     const unitPrice = slotPriceMinor(filters.minEffectiveReach, campaign.objective, filters, config);
 
     // Budget wins if both are given: floor(budget / unit) slots. A budget below one
@@ -265,6 +281,13 @@ export class CampaignsService {
     const totalPrice = unitPrice * BigInt(slots);
     const { promoterFeeMinor } = splitFee(unitPrice, config);
 
+    // Floor + defaults for the slider (governing logic #2): the UI clamps the
+    // slider's minimum to the category floor and pre-fills the category defaults.
+    // The preview itself stays honest to the driver; quote() is the hard gate.
+    const floorMinor = await this.rateConfig.getCategoryFloorMinor(category);
+    const defaults = await this.rateConfig.getCategoryDefaults(category);
+    const minSlots = unitPrice > 0n ? Number((floorMinor + unitPrice - 1n) / unitPrice) : 0; // ceil
+
     return {
       unit_price: toMoney(unitPrice),
       slots,
@@ -272,6 +295,12 @@ export class CampaignsService {
       promoter_fee: toMoney(promoterFeeMinor),
       reach_per_slot: filters.minEffectiveReach,
       estimated_total_reach: slots * filters.minEffectiveReach,
+      category,
+      floor_minor: toMoney(floorMinor),
+      min_slots: minSlots,
+      meets_floor: totalPrice >= floorMinor,
+      default_reach_per_slot: defaults.reachPerSlot,
+      default_promoters: defaults.promoters,
     };
   }
 
@@ -309,6 +338,12 @@ export class CampaignsService {
 
   // ── Helpers ──────────────────────────────────────────────
 
+  /** A campaign's pricing category, derived from the role it targets (default Distribution). */
+  private categoryOf(filters: TargetingFilters): CampaignCategory {
+    const role = (filters.roles[0] as PromoterRole) ?? PromoterRole.DISTRIBUTOR;
+    return categoryForRole(role);
+  }
+
   private assertEditable(campaign: Campaign): void {
     if (!EDITABLE.includes(campaign.status)) {
       throw new BadRequestException(`A ${campaign.status} campaign can no longer be edited.`);
@@ -331,6 +366,15 @@ export class CampaignsService {
       quoted_at: campaign.quotedAt ? campaign.quotedAt.toISOString() : null,
     };
   }
+}
+
+function categoryLabel(category: CampaignCategory): string {
+  return category === 'CREATION' ? 'Creation/Participation' : 'Distribution';
+}
+
+/** Kobo → a human ₦ string for error messages, e.g. 1500000n → "₦15,000". */
+function formatNaira(minor: bigint): string {
+  return `₦${(minor / 100n).toLocaleString('en-NG')}`;
 }
 
 function toFilters(t: {

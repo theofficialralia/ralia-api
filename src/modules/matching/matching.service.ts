@@ -18,7 +18,7 @@ import {
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { buildEligibility } from '../../common/eligibility/eligibility';
-import { slotPriceMinor, slotTargetReach, splitFee, PricingConfig, TargetingFilters } from '../../common/pricing/pricing';
+import { categoryForRole, slotPriceMinor, slotTargetReach, splitFee, PricingConfig, TargetingFilters } from '../../common/pricing/pricing';
 import {
   DEFAULT_SCORING_CONFIG,
   PromoterRole as CapabilityRole,
@@ -70,7 +70,10 @@ export class MatchingService {
 
     const filters = toFilters(campaign.targeting);
     const rate = await this.rateConfig.getActive();
-    const pricing = await this.rateConfig.getPricingConfig();
+    // The slot's role sets the pricing category, so reachFit inverts the same
+    // per-category RPM the slot's unitPrice was frozen at (§2/§7).
+    const slotRole = campaign.slots[0]?.role;
+    const pricing = await this.rateConfig.getPricingConfig(slotRole ? categoryForRole(slotRole) : undefined);
     const { channelWhere, profileWhere } = buildEligibility(filters, rate.minTrustScore);
     const ctx = this.scoringContext(campaign, filters, pricing);
 
@@ -222,7 +225,8 @@ export class MatchingService {
     const slot = campaign.slots[0];
     if (!slot) throw new BadRequestException('This campaign has no slots.');
 
-    const config = await this.rateConfig.getPricingConfig();
+    // Per-category pricing: the slot's role picks Distribution vs Creation RPM.
+    const config = await this.rateConfig.getPricingConfig(categoryForRole(slot.role));
     const rate = await this.rateConfig.getActive();
     const filters = toFilters(campaign.targeting);
     const { channelWhere } = buildEligibility(filters, rate.minTrustScore);

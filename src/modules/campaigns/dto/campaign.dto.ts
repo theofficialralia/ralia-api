@@ -263,6 +263,24 @@ export class CampaignPlanDto {
 
   @ApiProperty({ example: 24000, description: 'Estimated total reach = slots × reach_per_slot.' })
   estimated_total_reach!: number;
+
+  @ApiProperty({ enum: ['DISTRIBUTION', 'CREATION'], description: "The campaign's pricing category, derived from its targeted role." })
+  category!: string;
+
+  @ApiProperty({ type: MoneyDto, description: 'Minimum campaign fee for this category — the slider floor.' })
+  floor_minor!: MoneyDto;
+
+  @ApiProperty({ example: 5, description: 'Fewest slots that meet the category floor at the current unit price.' })
+  min_slots!: number;
+
+  @ApiProperty({ example: false, description: 'Whether this plan meets the category floor (total ≥ floor).' })
+  meets_floor!: boolean;
+
+  @ApiProperty({ example: 1000, description: 'Category default reach per slot the wizard pre-fills.' })
+  default_reach_per_slot!: number;
+
+  @ApiProperty({ example: 5, description: 'Category default promoter count the wizard pre-fills.' })
+  default_promoters!: number;
 }
 
 export class QuoteDto {

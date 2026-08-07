@@ -393,11 +393,12 @@ describe('matching — candidates, offers, accept', () => {
     const p = await makePromoter();
     const [offer] = await matching.sendOffers(campaignId, [p.userId]);
     // Per-promoter pricing: reach 2000 (20k Instagram × 0.10 × screenshot 1.0),
-    // AWARENESS, no filters → gross (2000/1000)×3000 = 6000 → fee round(6000×0.5) = 3000.
-    expect(offer!.fee_minor).toBe(3000);
+    // AWARENESS, no filters, Distribution slot (role DISTRIBUTOR → RPM 300,000/1,000)
+    // → gross (2000/1000)×300000 = 600000 → fee round(600000×0.5) = 300000.
+    expect(offer!.fee_minor).toBe(300000);
     // The gross and promised reach are frozen on the row for settlement.
     const row = await prisma.offer.findUniqueOrThrow({ where: { id: offer!.id } });
-    expect(row.grossMinor).toBe(6000n);
+    expect(row.grossMinor).toBe(600000n);
     expect(row.promisedReach).toBe(2000);
   });
 

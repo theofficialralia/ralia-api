@@ -179,18 +179,19 @@ describe('campaigns — draft, targeting, pricing', () => {
     const q = await http().post(`/campaigns/${id}/quote`).set(auth()).expect(201);
 
     // reach basis 1000, awareness 1.0, 3 active filters (states, platforms, minReach)
-    // → targeting_mult 1.15. unit = (1000/1000)×3000×1.0×1.15 = 3450. ×10 = 34500.
+    // → targeting_mult 1.15. Distribution slot (default role) → RPM 300,000/1,000.
+    // unit = (1000/1000)×300000×1.0×1.15 = 345000. ×10 = 3,450,000 (≥ ₦15k floor).
     expect(q.body.active_filters).toBe(3);
-    expect(q.body.unit_price.amount_minor).toBe(3450);
-    expect(q.body.price.amount_minor).toBe(34500);
-    // promoter keeps 50%: round(3450 × 0.5) = 1725
-    expect(q.body.promoter_fee.amount_minor).toBe(1725);
+    expect(q.body.unit_price.amount_minor).toBe(345000);
+    expect(q.body.price.amount_minor).toBe(3450000);
+    // promoter keeps 50%: round(345000 × 0.5) = 172500
+    expect(q.body.promoter_fee.amount_minor).toBe(172500);
     expect(q.body.eligible_promoters).toBe(5);
     expect(q.body.estimated_reach).toBeGreaterThan(0);
 
     const after = await http().get(`/campaigns/${id}`).set(auth()).expect(200);
     expect(after.body.status).toBe(CampaignStatus.QUOTED);
-    expect(after.body.price.amount_minor).toBe(34500);
+    expect(after.body.price.amount_minor).toBe(3450000);
     expect(after.body.quoted_at).not.toBeNull();
   });
 
@@ -200,16 +201,24 @@ describe('campaigns — draft, targeting, pricing', () => {
       .send({ states: ['Lagos'], platforms: ['INSTAGRAM'], min_effective_reach: 1000 })
       .expect(200);
 
-    // unit = 3450 (as above). Budget 20000 → floor(20000/3450) = 5 slots, reach 5×1000.
-    const byBudget = await http().post(`/campaigns/${id}/plan`).set(auth()).send({ budget_minor: 20000 }).expect(200);
-    expect(byBudget.body.unit_price.amount_minor).toBe(3450);
+    // unit = 345000 (as above). Budget 2,000,000 → floor(2000000/345000) = 5 slots, reach 5×1000.
+    const byBudget = await http().post(`/campaigns/${id}/plan`).set(auth()).send({ budget_minor: 2000000 }).expect(200);
+    expect(byBudget.body.unit_price.amount_minor).toBe(345000);
     expect(byBudget.body.slots).toBe(5);
-    expect(byBudget.body.total_price.amount_minor).toBe(17250);
+    expect(byBudget.body.total_price.amount_minor).toBe(1725000);
     expect(byBudget.body.estimated_total_reach).toBe(5000);
+    // Distribution floor surfaced for the slider: ₦15,000 = 1,500,000 kobo,
+    // ceil(1,500,000 / 345,000) = 5 slots. This plan (5 slots) meets it.
+    expect(byBudget.body.category).toBe('DISTRIBUTION');
+    expect(byBudget.body.floor_minor.amount_minor).toBe(1500000);
+    expect(byBudget.body.min_slots).toBe(5);
+    expect(byBudget.body.meets_floor).toBe(true);
+    expect(byBudget.body.default_promoters).toBe(5);
+    expect(byBudget.body.default_reach_per_slot).toBe(1000);
 
     // Driving by slots prices them directly.
     const bySlots = await http().post(`/campaigns/${id}/plan`).set(auth()).send({ slots: 8 }).expect(200);
-    expect(bySlots.body.total_price.amount_minor).toBe(27600);
+    expect(bySlots.body.total_price.amount_minor).toBe(2760000);
     expect(bySlots.body.estimated_total_reach).toBe(8000);
 
     // The preview persisted nothing: the campaign is still an unpriced DRAFT.
@@ -226,8 +235,8 @@ describe('campaigns — draft, targeting, pricing', () => {
     const q1 = await http().post(`/campaigns/${id}/quote`).set(auth()).expect(201);
     const originalPrice = q1.body.price.amount_minor;
 
-    // Double the RPM. The stored price must not move.
-    await prisma.rateConfig.updateMany({ where: { isActive: true }, data: { rpmMinor: 6000 } });
+    // Double the (Distribution) RPM. The stored price must not move.
+    await prisma.rateConfig.updateMany({ where: { isActive: true }, data: { rpmDistributionMinor: 600000 } });
 
     const after = await http().get(`/campaigns/${id}`).set(auth()).expect(200);
     expect(after.body.price.amount_minor).toBe(originalPrice);
