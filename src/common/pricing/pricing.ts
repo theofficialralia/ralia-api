@@ -1,4 +1,23 @@
-import { CampaignObjective } from '@prisma/client';
+import { CampaignObjective, PromoterRole } from '@prisma/client';
+
+/**
+ * A campaign's pricing category — the product owner's two governing tiers.
+ * Distribution is priced for raw reach; Creation/Participation is priced for the
+ * work of making content. Each carries its own RPM, minimum campaign floor, and
+ * default reach/promoter counts (all in rate_config).
+ */
+export type CampaignCategory = 'DISTRIBUTION' | 'CREATION';
+
+/**
+ * Which category a slot's role belongs to. CREATOR and PARTICIPATOR are the
+ * "Creation/Participation" tier; DISTRIBUTOR and INFLUENCER are reach-driven, so
+ * they price as Distribution.
+ */
+export function categoryForRole(role: PromoterRole): CampaignCategory {
+  return role === PromoterRole.CREATOR || role === PromoterRole.PARTICIPATOR
+    ? 'CREATION'
+    : 'DISTRIBUTION';
+}
 
 /**
  * Deterministic pricing — handoff §5.2.

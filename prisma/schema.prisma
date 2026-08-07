@@ -896,7 +896,23 @@ model RateConfig {
   isActive Boolean @default(false) @map("is_active")
 
   // §5.2 pricing
+  // Legacy flat RPM (kobo per 1,000 effective views). Retained as a fallback for
+  // any code path without a category; live pricing uses the per-category rates below.
   rpmMinor            Int     @default(3000) @map("rpm_minor")
+  // Per-category RPM (kobo per 1,000 effective views). A distributor is paid for
+  // reach, a creator mostly for the work of making content, so the rates differ.
+  //   Distribution ₦3,000/1,000 = 300,000 kobo · Creation ₦500/1,000 = 50,000 kobo
+  rpmDistributionMinor Int    @default(300000) @map("rpm_distribution_minor")
+  rpmCreationMinor     Int    @default(50000)  @map("rpm_creation_minor")
+  // Category minimum campaign fee (kobo). A campaign cannot be booked below its floor.
+  //   Distribution ₦15,000 = 1,500,000 kobo · Creation ₦100,000 = 10,000,000 kobo
+  floorDistributionMinor BigInt @default(1500000)  @map("floor_distribution_minor")
+  floorCreationMinor     BigInt @default(10000000) @map("floor_creation_minor")
+  // Category defaults the campaign wizard pre-fills (the client can scale up).
+  defaultReachDistribution     Int @default(1000)  @map("default_reach_distribution")
+  defaultReachCreation         Int @default(10000) @map("default_reach_creation")
+  defaultPromotersDistribution Int @default(5)     @map("default_promoters_distribution")
+  defaultPromotersCreation     Int @default(20)    @map("default_promoters_creation")
   multAwareness       Decimal @default(1.0) @map("mult_awareness") @db.Decimal(4, 2)
   multWebsiteVisit    Decimal @default(1.1) @map("mult_website_visit") @db.Decimal(4, 2)
   multAppInstall      Decimal @default(1.25) @map("mult_app_install") @db.Decimal(4, 2)

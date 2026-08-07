@@ -1,6 +1,6 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { CampaignObjective, Platform, Prisma, RateConfig, VerificationTier } from '@prisma/client';
-import { PricingConfig, SettlementConfig } from '../pricing/pricing';
+import { CampaignCategory, PricingConfig, SettlementConfig } from '../pricing/pricing';
 import { ReachFactors, ReachPolicy } from '../reach/effective-reach';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -65,11 +65,17 @@ export class RateConfigService {
     };
   }
 
-  /** §5.2 pricing coefficients, as integer hundredths where they are multipliers. */
-  async getPricingConfig(): Promise<PricingConfig> {
+  /**
+   * §5.2 pricing coefficients, as integer hundredths where they are multipliers.
+   *
+   * When a category is given, the per-category RPM is used (Distribution vs
+   * Creation); without one, the legacy flat `rpmMinor` is the fallback. Everything
+   * else (objective/targeting multipliers, take rate) is category-independent.
+   */
+  async getPricingConfig(category?: CampaignCategory): Promise<PricingConfig> {
     const c = await this.getActive();
     return {
-      rpmMinor: c.rpmMinor,
+      rpmMinor: this.rpmForCategory(c, category),
       objectiveMultHundredths: {
         [CampaignObjective.AWARENESS]: toHundredths(c.multAwareness),
         [CampaignObjective.WEBSITE_VISIT]: toHundredths(c.multWebsiteVisit),
@@ -90,5 +96,27 @@ export class RateConfigService {
       takeRateHundredths: toHundredths(c.takeRate),
       deliveryThresholdPct: c.deliveryThresholdPct,
     };
+  }
+
+  /** The minimum campaign fee (kobo) a campaign in this category may be booked at. */
+  async getCategoryFloorMinor(category: CampaignCategory): Promise<bigint> {
+    const c = await this.getActive();
+    return category === 'CREATION' ? c.floorCreationMinor : c.floorDistributionMinor;
+  }
+
+  /** The wizard's pre-filled starting point for a category — reach per slot and promoter count. */
+  async getCategoryDefaults(
+    category: CampaignCategory,
+  ): Promise<{ reachPerSlot: number; promoters: number }> {
+    const c = await this.getActive();
+    return category === 'CREATION'
+      ? { reachPerSlot: c.defaultReachCreation, promoters: c.defaultPromotersCreation }
+      : { reachPerSlot: c.defaultReachDistribution, promoters: c.defaultPromotersDistribution };
+  }
+
+  private rpmForCategory(c: RateConfig, category?: CampaignCategory): number {
+    if (category === 'DISTRIBUTION') return c.rpmDistributionMinor;
+    if (category === 'CREATION') return c.rpmCreationMinor;
+    return c.rpmMinor;
   }
 }
