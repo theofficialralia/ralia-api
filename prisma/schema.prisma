@@ -184,6 +184,11 @@ model ClientOrg {
   supportContactName   String? @map("support_contact_name")
   supportContactPhone  String? @map("support_contact_phone")
   description          String?
+  // Primary social presence captured at org setup (shown to promoters as the
+  // campaign owner). Platform is a free string matching the Platform enum values.
+  socialPlatform       String? @map("social_platform")
+  socialUrl            String? @map("social_url")
+  socialFollowers      Int?    @map("social_followers")
 
   createdAt     DateTime        @default(now()) @map("created_at")
   updatedAt     DateTime        @updatedAt @map("updated_at")

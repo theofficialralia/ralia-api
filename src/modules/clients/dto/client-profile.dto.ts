@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { IsInt, IsOptional, IsString, Matches, MaxLength, Min } from 'class-validator';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -40,6 +40,18 @@ export class UpdateClientProfileDto {
   @ApiPropertyOptional({ example: 'A couple of sentences about what you do.' })
   @IsOptional() @IsString() @MaxLength(1000) @Transform(trim)
   description?: string;
+
+  @ApiPropertyOptional({ example: 'INSTAGRAM', description: 'Primary social platform (Platform enum value).' })
+  @IsOptional() @IsString() @MaxLength(30) @Transform(trim)
+  social_platform?: string;
+
+  @ApiPropertyOptional({ example: 'instagram.com/skinsmith' })
+  @IsOptional() @IsString() @MaxLength(200) @Transform(trim)
+  social_url?: string;
+
+  @ApiPropertyOptional({ example: 4200, description: 'Follower/subscriber count on the primary social.' })
+  @IsOptional() @IsInt() @Min(0)
+  social_followers?: number;
 }
 
 export class ClientProfileDto {
@@ -75,6 +87,15 @@ export class ClientProfileDto {
 
   @ApiProperty({ nullable: true })
   description!: string | null;
+
+  @ApiProperty({ nullable: true })
+  social_platform!: string | null;
+
+  @ApiProperty({ nullable: true })
+  social_url!: string | null;
+
+  @ApiProperty({ nullable: true })
+  social_followers!: number | null;
 
   @ApiProperty({ example: 'ACTIVE' })
   status!: string;
