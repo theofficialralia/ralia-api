@@ -457,6 +457,11 @@ model Campaign {
   description         String?
   promoterInstructions String?          @map("promoter_instructions")
   destinationUrl      String?           @map("destination_url")
+  // Per-role task detail captured at Targeting (what the chosen promoter role
+  // should actually do): content type (Creator), task mode + task types
+  // (Participator), budget/following/reach buckets (Influencer, offline tasks).
+  // JSON — it's descriptive campaign metadata, not part of the pricing math.
+  roleConfig          Json?             @map("role_config")
   status              CampaignStatus    @default(DRAFT)
   needsCreative       Boolean           @default(false) @map("needs_creative")
   budgetMinor         BigInt            @map("budget_minor")

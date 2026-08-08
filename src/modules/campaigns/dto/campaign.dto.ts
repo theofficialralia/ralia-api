@@ -16,6 +16,40 @@ import {
 } from 'class-validator';
 import { MoneyDto } from '../../ledger/money';
 
+// ── Per-role task config ─────────────────────────────────────
+
+/**
+ * The role-specific task detail captured on the Targeting step. Which fields
+ * apply depends on the chosen role: content_type (Creator); task_mode + task_types
+ * (Participator); budget_bucket/following_size (Influencer); budget_bucket/
+ * audience_reach (offline Participator). All optional — descriptive metadata.
+ */
+export class RoleConfigDto {
+  @ApiPropertyOptional({ example: 'Educate (How to)' })
+  @IsOptional() @IsString() @MaxLength(60) @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  content_type?: string;
+
+  @ApiPropertyOptional({ enum: ['ONLINE', 'OFFLINE'] })
+  @IsOptional() @IsString() @MaxLength(10)
+  task_mode?: string;
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional() @IsArray() @ArrayMaxSize(10) @IsString({ each: true })
+  task_types?: string[];
+
+  @ApiPropertyOptional({ example: '₦1M – ₦2M' })
+  @IsOptional() @IsString() @MaxLength(30)
+  budget_bucket?: string;
+
+  @ApiPropertyOptional({ example: '50k – 100k' })
+  @IsOptional() @IsString() @MaxLength(40)
+  following_size?: string;
+
+  @ApiPropertyOptional({ example: '50k – 100k' })
+  @IsOptional() @IsString() @MaxLength(30)
+  audience_reach?: string;
+}
+
 // ── Create / edit ────────────────────────────────────────────
 
 export class CreateCampaignDto {
@@ -90,6 +124,12 @@ export class UpdateCampaignDto {
   @Min(1)
   @Max(500)
   slots_total?: number;
+
+  @ApiPropertyOptional({ type: RoleConfigDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RoleConfigDto)
+  role_config?: RoleConfigDto;
 }
 
 // ── Targeting ────────────────────────────────────────────────
@@ -224,6 +264,9 @@ export class CampaignDto {
 
   @ApiProperty({ nullable: true, format: 'date-time' })
   quoted_at!: string | null;
+
+  @ApiPropertyOptional({ type: RoleConfigDto, nullable: true, description: 'Per-role task detail from Targeting.' })
+  role_config?: RoleConfigDto | null;
 }
 
 /** Drive a stateless quote preview by a budget or a slot count (budget wins if both given). */

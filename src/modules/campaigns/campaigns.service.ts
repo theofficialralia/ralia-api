@@ -22,6 +22,7 @@ import {
   CampaignPlanDto,
   CreateCampaignDto,
   QuoteDto,
+  RoleConfigDto,
   SetTargetingDto,
   UpdateCampaignDto,
 } from './dto/campaign.dto';
@@ -112,6 +113,7 @@ export class CampaignsService {
     if (dto.promoter_instructions !== undefined) data.promoterInstructions = dto.promoter_instructions;
     if (dto.destination_url !== undefined) data.destinationUrl = dto.destination_url;
     if (dto.slots_total !== undefined) data.slotsTotal = dto.slots_total;
+    if (dto.role_config !== undefined) data.roleConfig = dto.role_config as unknown as Prisma.InputJsonValue;
 
     // Any content change invalidates a prior quote — the price must be recomputed
     // before approval, so drop back to DRAFT and clear the stale price.
@@ -360,6 +362,7 @@ export class CampaignsService {
       price: campaign.priceMinor === null ? null : toMoney(campaign.priceMinor),
       budget: toMoney(campaign.budgetMinor),
       quoted_at: campaign.quotedAt ? campaign.quotedAt.toISOString() : null,
+      role_config: (campaign.roleConfig as unknown as RoleConfigDto | null) ?? null,
     };
   }
 }
