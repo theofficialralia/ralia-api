@@ -263,9 +263,12 @@ describe('campaigns — draft, targeting, pricing', () => {
     expect(retargeted.body.price).toBeNull();
   });
 
-  it('refuses a quote with no minimum effective reach', async () => {
+  it('quotes at the category default reach when none is set', async () => {
     const id = await createDraft();
-    await http().post(`/campaigns/${id}/quote`).set(auth()).expect(400);
+    // No targeting/role → Distribution category, default reach 1,000 at RPM 300,000
+    // → unit 300,000. 12 slots = 3,600,000, clears the ₦15k floor.
+    const q = await http().post(`/campaigns/${id}/quote`).set(auth()).expect(201);
+    expect(q.body.unit_price.amount_minor).toBe(300000);
   });
 
   it('moves a quoted campaign to PENDING_APPROVAL on submit', async () => {

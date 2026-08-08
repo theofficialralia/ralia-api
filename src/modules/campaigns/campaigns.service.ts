@@ -179,15 +179,14 @@ export class CampaignsService {
     const targeting = await this.prisma.campaignTargeting.findUnique({ where: { campaignId } });
     const filters = targeting ? toFilters(targeting) : NO_FILTERS;
 
-    if (filters.minEffectiveReach <= 0) {
-      throw new BadRequestException(
-        'Set a minimum effective reach in targeting before requesting a quote — it is the basis each slot is priced on.',
-      );
-    }
-
     const category = this.categoryOf(filters);
     const config = await this.rateConfig.getPricingConfig(category);
-    const unitPrice = slotPriceMinor(filters.minEffectiveReach, campaign.objective, filters, config);
+    // Reach per slot: the client's explicit floor if set, else the category default
+    // (the create-campaign flow no longer asks for reach directly — it comes from
+    // the chosen role's category).
+    const defaults = await this.rateConfig.getCategoryDefaults(category);
+    const reachPerSlot = filters.minEffectiveReach > 0 ? filters.minEffectiveReach : defaults.reachPerSlot;
+    const unitPrice = slotPriceMinor(reachPerSlot, campaign.objective, filters, config);
     const totalPrice = unitPrice * BigInt(campaign.slotsTotal);
 
     // Category floor (governing logic #2): a campaign cannot be booked below its
@@ -196,7 +195,7 @@ export class CampaignsService {
     if (totalPrice < floorMinor) {
       throw new BadRequestException(
         `A ${categoryLabel(category)} campaign must be at least ${formatNaira(floorMinor)}. ` +
-          `At ${campaign.slotsTotal} slot(s) × ${filters.minEffectiveReach} reach this prices to ` +
+          `At ${campaign.slotsTotal} slot(s) × ${reachPerSlot} reach this prices to ` +
           `${formatNaira(totalPrice)} — raise the slot count or the reach per slot.`,
       );
     }
@@ -256,15 +255,13 @@ export class CampaignsService {
 
     const targeting = await this.prisma.campaignTargeting.findUnique({ where: { campaignId } });
     const filters = targeting ? toFilters(targeting) : NO_FILTERS;
-    if (filters.minEffectiveReach <= 0) {
-      throw new BadRequestException(
-        'Set a minimum effective reach in targeting first — it is the per-slot basis the plan prices on.',
-      );
-    }
 
     const category = this.categoryOf(filters);
     const config = await this.rateConfig.getPricingConfig(category);
-    const unitPrice = slotPriceMinor(filters.minEffectiveReach, campaign.objective, filters, config);
+    const defaults = await this.rateConfig.getCategoryDefaults(category);
+    // Reach per slot falls back to the category default when the client hasn't set one.
+    const reachPerSlot = filters.minEffectiveReach > 0 ? filters.minEffectiveReach : defaults.reachPerSlot;
+    const unitPrice = slotPriceMinor(reachPerSlot, campaign.objective, filters, config);
 
     // Budget wins if both are given: floor(budget / unit) slots. A budget below one
     // slot yields zero — the UI shows "raise your budget". Otherwise price the slots.
@@ -281,11 +278,10 @@ export class CampaignsService {
     const totalPrice = unitPrice * BigInt(slots);
     const { promoterFeeMinor } = splitFee(unitPrice, config);
 
-    // Floor + defaults for the slider (governing logic #2): the UI clamps the
-    // slider's minimum to the category floor and pre-fills the category defaults.
-    // The preview itself stays honest to the driver; quote() is the hard gate.
+    // Floor for the slider (governing logic #2): the UI clamps the slider's minimum
+    // to the category floor and pre-fills the category defaults. The preview itself
+    // stays honest to the driver; quote() is the hard gate.
     const floorMinor = await this.rateConfig.getCategoryFloorMinor(category);
-    const defaults = await this.rateConfig.getCategoryDefaults(category);
     const minSlots = unitPrice > 0n ? Number((floorMinor + unitPrice - 1n) / unitPrice) : 0; // ceil
 
     return {
@@ -293,8 +289,8 @@ export class CampaignsService {
       slots,
       total_price: toMoney(totalPrice),
       promoter_fee: toMoney(promoterFeeMinor),
-      reach_per_slot: filters.minEffectiveReach,
-      estimated_total_reach: slots * filters.minEffectiveReach,
+      reach_per_slot: reachPerSlot,
+      estimated_total_reach: slots * reachPerSlot,
       category,
       floor_minor: toMoney(floorMinor),
       min_slots: minSlots,
