@@ -16,6 +16,7 @@ import {
   WithdrawalStatus,
 } from '@prisma/client';
 import { settleDelivery } from '../../common/pricing/pricing';
+import { asRoleConfig, describeRoleTask } from '../../common/campaign/role-task';
 import { channelEffectiveReach } from '../../common/reach/effective-reach';
 import { STORAGE, StorageProvider } from '../../common/storage/storage';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -956,6 +957,8 @@ export class AdminService {
       total_clicks: totalClicks,
       description: c.description,
       promoter_instructions: c.promoterInstructions,
+      role_config: asRoleConfig(c.roleConfig),
+      task: describeRoleTask(c.targeting?.roles?.[0] ?? 'DISTRIBUTOR', asRoleConfig(c.roleConfig)),
       destination_url: c.destinationUrl,
       needs_creative: c.needsCreative,
       slots_total: c.slotsTotal,

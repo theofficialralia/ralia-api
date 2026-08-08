@@ -37,6 +37,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
 import { formatNaira, toMoney } from '../ledger/money';
 import { NotificationService } from '../notifications/notification.service';
+import { asRoleConfig, describeRoleTask } from '../../common/campaign/role-task';
 import { CandidateDto, OfferDto, AssignmentDto } from './dto/matching.dto';
 
 @Injectable()
@@ -429,7 +430,7 @@ export class MatchingService {
       where: { promoterId },
       orderBy: { createdAt: 'desc' },
       include: {
-        campaign: { select: { name: true, objective: true, promoterInstructions: true, destinationUrl: true } },
+        campaign: { select: { name: true, objective: true, promoterInstructions: true, destinationUrl: true, roleConfig: true } },
         submissions: { orderBy: { submittedAt: 'desc' }, take: 1, select: { verdict: true, rejectReason: true } },
         trackingLink: { select: { token: true } },
       },
@@ -454,6 +455,8 @@ export class MatchingService {
       status: a.status,
       due_at: a.dueAt?.toISOString() ?? null,
       instructions: a.campaign.promoterInstructions,
+      // Plain-language "what to do" from the campaign's per-role task config.
+      task: describeRoleTask(a.role, asRoleConfig(a.campaign.roleConfig)),
       destination_url: a.campaign.destinationUrl,
       clicks: a.trackingLink ? clicksByToken.get(a.trackingLink.token) ?? 0 : 0,
       latest_verdict: a.submissions[0]?.verdict ?? null,
