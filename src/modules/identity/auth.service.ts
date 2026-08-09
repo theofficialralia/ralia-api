@@ -97,9 +97,22 @@ export class AuthService {
         });
       } else {
         // The profile exists from signup so the questionnaire has somewhere to
-        // save partial answers (B3). Empty is a valid state; PROFILE_INCOMPLETE says so.
+        // save partial answers (B3). The signup form now captures the basics; the
+        // rest is filled in the "complete your profile" steps. PROFILE_INCOMPLETE
+        // until the questionnaire is done.
+        const dob = dto.date_of_birth ? new Date(dto.date_of_birth) : null;
         await tx.promoterProfile.create({
-          data: { userId: created.id, status: PromoterStatus.PROFILE_INCOMPLETE },
+          data: {
+            userId: created.id,
+            status: PromoterStatus.PROFILE_INCOMPLETE,
+            fullName: dto.full_name?.trim() ?? null,
+            gender: dto.gender ?? null,
+            dob,
+            age: dob ? ageFromDob(dob, now) : null,
+            countryResidence: dto.country?.trim() ?? null,
+            locationState: dto.state?.trim() ?? null,
+            locationLga: dto.lga?.trim() ?? null,
+          },
         });
       }
 
@@ -225,4 +238,12 @@ let decoyHashPromise: Promise<string> | null = null;
 function decoyHash(): Promise<string> {
   decoyHashPromise ??= argon2.hash(randomBytes(32).toString('hex'));
   return decoyHashPromise;
+}
+
+/** Whole years between a date of birth and a reference date. */
+function ageFromDob(dob: Date, now: Date): number {
+  let age = now.getFullYear() - dob.getFullYear();
+  const m = now.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
+  return age;
 }

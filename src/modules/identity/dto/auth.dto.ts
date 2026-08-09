@@ -1,8 +1,9 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { AdminCapability, Role } from '@prisma/client';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { AdminCapability, Gender, Role } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
+  IsDateString,
   IsEmail,
   IsEnum,
   IsOptional,
@@ -45,6 +46,31 @@ export class RegisterDto {
   @IsString()
   @MaxLength(120)
   org_name?: string;
+
+  // ── Promoter profile (optional; captured on the promoter signup form) ──
+  @ApiPropertyOptional({ example: 'Chidera Okoye', description: 'Promoter full name.' })
+  @IsOptional() @IsString() @MaxLength(120) @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  full_name?: string;
+
+  @ApiPropertyOptional({ enum: Gender })
+  @IsOptional() @IsEnum(Gender)
+  gender?: Gender;
+
+  @ApiPropertyOptional({ example: '1998-04-12', description: 'ISO date (YYYY-MM-DD).' })
+  @IsOptional() @IsDateString()
+  date_of_birth?: string;
+
+  @ApiPropertyOptional({ example: 'Nigeria' })
+  @IsOptional() @IsString() @MaxLength(60)
+  country?: string;
+
+  @ApiPropertyOptional({ example: 'Lagos' })
+  @IsOptional() @IsString() @MaxLength(60)
+  state?: string;
+
+  @ApiPropertyOptional({ example: 'Ikeja' })
+  @IsOptional() @IsString() @MaxLength(80)
+  lga?: string;
 
   @ApiProperty({ example: true, description: 'Must be true. Recorded as a consent row.' })
   @IsBoolean()
