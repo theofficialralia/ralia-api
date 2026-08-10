@@ -4,6 +4,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsOptional,
@@ -130,6 +131,18 @@ export class UpdateCampaignDto {
   @ValidateNested()
   @Type(() => RoleConfigDto)
   role_config?: RoleConfigDto;
+
+  @ApiPropertyOptional({ description: 'True when the client asked Ralia to design the creative.' })
+  @IsOptional()
+  @IsBoolean()
+  needs_creative?: boolean;
+
+  @ApiPropertyOptional({ example: 'A bold poster for our zobo launch.', description: 'Design request when needs_creative is true.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  design_brief?: string;
 }
 
 // ── Targeting ────────────────────────────────────────────────

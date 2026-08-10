@@ -114,6 +114,8 @@ export class CampaignsService {
     if (dto.destination_url !== undefined) data.destinationUrl = dto.destination_url;
     if (dto.slots_total !== undefined) data.slotsTotal = dto.slots_total;
     if (dto.role_config !== undefined) data.roleConfig = dto.role_config as unknown as Prisma.InputJsonValue;
+    if (dto.needs_creative !== undefined) data.needsCreative = dto.needs_creative;
+    if (dto.design_brief !== undefined) data.designBrief = dto.design_brief;
 
     // Any content change invalidates a prior quote — the price must be recomputed
     // before approval, so drop back to DRAFT and clear the stale price.

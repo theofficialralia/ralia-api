@@ -462,6 +462,9 @@ model Campaign {
   // (Participator), budget/following/reach buckets (Influencer, offline tasks).
   // JSON — it's descriptive campaign metadata, not part of the pricing math.
   roleConfig          Json?             @map("role_config")
+  // When needsCreative is true the client asked Ralia's design team to make the
+  // asset; designBrief is their free-text request ("what should we design?").
+  designBrief         String?           @map("design_brief")
   status              CampaignStatus    @default(DRAFT)
   needsCreative       Boolean           @default(false) @map("needs_creative")
   budgetMinor         BigInt            @map("budget_minor")
