@@ -1,10 +1,15 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Channel, ChannelStatus, Platform, VerificationTier } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { channelEffectiveReach } from '../../common/reach/effective-reach';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { STORAGE, StorageProvider } from '../../common/storage/storage';
 import { ChannelDto, CreateChannelDto } from './dto/profile.dto';
 import { ProfileService } from './profile.service';
+
+const EVIDENCE_MAX_BYTES = 5 * 1024 * 1024;
+const EVIDENCE_MIME: Record<string, true> = { 'image/png': true, 'image/jpeg': true, 'image/webp': true };
 
 @Injectable()
 export class ChannelsService {
@@ -12,6 +17,7 @@ export class ChannelsService {
     private readonly prisma: PrismaService,
     private readonly rateConfig: RateConfigService,
     private readonly profiles: ProfileService,
+    @Inject(STORAGE) private readonly storage: StorageProvider,
   ) {}
 
   async list(promoterId: string): Promise<ChannelDto[]> {
@@ -67,6 +73,44 @@ export class ChannelsService {
     await this.profiles.maybeSubmitForApproval(promoterId);
 
     return toDto(channel);
+  }
+
+  /**
+   * Attach an analytics/insights screenshot to a channel as verification evidence.
+   * The file is stored and linked, but the tier stays SELF — an admin reviews the
+   * evidence and sets SCREENSHOT/INSIGHTS (B8); a self-verifying promoter could
+   * otherwise apply their own reach multiplier.
+   */
+  async attachEvidence(
+    promoterId: string,
+    channelId: string,
+    file?: { buffer: Buffer; mimetype: string; size: number },
+  ): Promise<ChannelDto> {
+    const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
+    if (!channel || channel.promoterId !== promoterId) throw new NotFoundException('No such channel.');
+    if (!file) throw new BadRequestException('An analytics image is required.');
+    if (file.size > EVIDENCE_MAX_BYTES) throw new BadRequestException('File exceeds the 5 MB limit.');
+    if (!EVIDENCE_MIME[file.mimetype]) throw new BadRequestException(`Unsupported file type ${file.mimetype}.`);
+
+    const stored = await this.storage.put(`channels/${channelId}/evidence/${randomUUID()}`, file.buffer, file.mimetype);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const fileRow = await tx.file.create({
+        data: {
+          storageKey: stored.key,
+          bucket: stored.bucket,
+          mimeType: stored.mimeType,
+          sizeBytes: stored.sizeBytes,
+          checksumSha256: stored.checksumSha256,
+          uploadedBy: promoterId,
+        },
+      });
+      return tx.channel.update({
+        where: { id: channelId },
+        // Tier is unchanged — this queues the proof for admin review, not self-verification.
+        data: { evidenceFileId: fileRow.id, status: ChannelStatus.PENDING_REVIEW },
+      });
+    });
+    return toDto(updated);
   }
 
   async remove(promoterId: string, channelId: string): Promise<void> {

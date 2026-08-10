@@ -9,10 +9,15 @@ import {
   ParseUUIDPipe,
   Post,
   Put,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Role } from '@prisma/client';
 import {
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiOkResponse,
@@ -78,6 +83,23 @@ export class PromotersController {
   @ApiCreatedResponse({ type: ChannelDto })
   createChannel(@CurrentUser() user: AuthedUser, @Body() dto: CreateChannelDto): Promise<ChannelDto> {
     return this.channels.create(user.id, dto);
+  }
+
+  @Post('channels/:id/evidence')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Upload analytics evidence for a channel',
+    description: 'An insights/analytics screenshot (image, ≤5 MB). Queued for admin review — the verification tier is not self-set.',
+  })
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } }, required: ['file'] } })
+  @ApiCreatedResponse({ type: ChannelDto })
+  uploadChannelEvidence(
+    @CurrentUser() user: AuthedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file?: { buffer: Buffer; mimetype: string; size: number },
+  ): Promise<ChannelDto> {
+    return this.channels.attachEvidence(user.id, id, file);
   }
 
   @Delete('channels/:id')
