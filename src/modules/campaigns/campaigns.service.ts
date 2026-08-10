@@ -90,7 +90,16 @@ export class CampaignsService {
     const totalClicks = await this.prisma.clickEvent.count({
       where: { isBot: false, trackingLink: { assignment: { campaignId } } },
     });
-    return { ...this.toDto(campaign), total_clicks: totalClicks };
+    // Targeting is returned here so the client can resume a draft in the wizard.
+    const t = await this.prisma.campaignTargeting.findUnique({ where: { campaignId } });
+    const targeting = t
+      ? {
+          states: t.states, lgas: t.lgas, age_min: t.ageMin, age_max: t.ageMax,
+          genders: t.genders, languages: t.languages, categories: t.categories,
+          platforms: t.platforms, min_effective_reach: t.minEffectiveReach, roles: t.roles,
+        }
+      : null;
+    return { ...this.toDto(campaign), total_clicks: totalClicks, targeting };
   }
 
   async list(userId: string): Promise<CampaignDto[]> {
@@ -365,6 +374,8 @@ export class CampaignsService {
       budget: toMoney(campaign.budgetMinor),
       quoted_at: campaign.quotedAt ? campaign.quotedAt.toISOString() : null,
       role_config: (campaign.roleConfig as unknown as RoleConfigDto | null) ?? null,
+      needs_creative: campaign.needsCreative,
+      design_brief: campaign.designBrief,
     };
   }
 }

@@ -280,6 +280,29 @@ export class CampaignDto {
 
   @ApiPropertyOptional({ type: RoleConfigDto, nullable: true, description: 'Per-role task detail from Targeting.' })
   role_config?: RoleConfigDto | null;
+
+  @ApiPropertyOptional({ description: 'Whether the client asked Ralia to design the creative.' })
+  needs_creative?: boolean;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Design request when needs_creative is true.' })
+  design_brief?: string | null;
+
+  @ApiPropertyOptional({ type: () => CampaignTargetingView, nullable: true, description: 'Present on the single-campaign fetch — lets the client resume a draft.' })
+  targeting?: CampaignTargetingView | null;
+}
+
+/** Saved targeting, echoed back so the create wizard can rehydrate a draft. */
+export class CampaignTargetingView {
+  @ApiProperty({ type: [String] }) states!: string[];
+  @ApiProperty({ type: [String] }) lgas!: string[];
+  @ApiProperty({ nullable: true }) age_min!: number | null;
+  @ApiProperty({ nullable: true }) age_max!: number | null;
+  @ApiProperty({ type: [String] }) genders!: string[];
+  @ApiProperty({ type: [String] }) languages!: string[];
+  @ApiProperty({ type: [String] }) categories!: string[];
+  @ApiProperty({ type: [String] }) platforms!: string[];
+  @ApiProperty() min_effective_reach!: number;
+  @ApiProperty({ type: [String] }) roles!: string[];
 }
 
 /** Drive a stateless quote preview by a budget or a slot count (budget wins if both given). */
