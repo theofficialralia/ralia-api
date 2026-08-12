@@ -337,34 +337,31 @@ export class LedgerService {
    * Approve a submission with pro-rata settlement (ALGORITHMS.md §2), in ONE
    * balanced transaction so a retry can never strand a partial result:
    *
-   *   DR CAMPAIGN_ESCROW  (fee + take + refund = the full slot gross)
+   *   DR CAMPAIGN_ESCROW  (fee + take = the full slot gross)
    *   CR PROMOTER_AVAILABLE  fee     (delivered pro-rata)
-   *   CR RALIA_REVENUE       take
-   *   CR CLIENT_WALLET       refund  (the undelivered remainder)
+   *   CR RALIA_REVENUE       take    (Ralia's cut + any undelivered remainder)
    *
-   * Zero-amount credits are dropped — the ledger primitive requires positive
-   * entries — and dropping them preserves the balance because they contribute
-   * nothing. fee + take always equals the delivered gross, so what remains after
-   * the refund is exactly what escrow held for this slot.
+   * There is no client refund — the platform has no client wallet, so an
+   * under-delivery is retained by Ralia rather than returned. fee + take always
+   * equals the full slot gross, so escrow settles to exactly what it held. A
+   * zero-amount credit is dropped — the primitive requires positive entries —
+   * which preserves the balance.
    */
   async settleSubmission(args: {
     submissionId: string;
     escrowAccountId: string;
     promoterAccountId: string;
-    clientWalletAccountId: string;
     feeMinor: bigint;
     takeMinor: bigint;
-    refundMinor: bigint;
     idempotencyKey: string;
     actorId?: string;
   }): Promise<{ transactionId: string; replayed: boolean }> {
     const revenue = await this.getPlatformAccountId(AccountKind.RALIA_REVENUE);
-    const grossOut = args.feeMinor + args.takeMinor + args.refundMinor;
+    const grossOut = args.feeMinor + args.takeMinor;
 
     const credits: EntryInput[] = [
       { accountId: args.promoterAccountId, direction: EntryDirection.CREDIT, amountMinor: args.feeMinor },
       { accountId: revenue, direction: EntryDirection.CREDIT, amountMinor: args.takeMinor },
-      { accountId: args.clientWalletAccountId, direction: EntryDirection.CREDIT, amountMinor: args.refundMinor },
     ].filter((e) => e.amountMinor > 0n);
 
     return this.post({

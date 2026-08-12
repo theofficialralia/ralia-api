@@ -177,7 +177,7 @@ export class ExposureReportDto {
   @ApiProperty({ type: MoneyDto, description: 'Client funds committed to live campaigns (Σ CAMPAIGN_ESCROW).' })
   escrow_held!: MoneyDto;
 
-  @ApiProperty({ type: MoneyDto, description: 'Refunded remainders sitting in client wallets.' })
+  @ApiProperty({ type: MoneyDto, description: 'Legacy client-wallet balance — always ₦0 now that under-deliveries are retained by the platform, not refunded.' })
   client_wallet!: MoneyDto;
 
   @ApiProperty({ type: MoneyDto, description: 'Ralia’s cumulative take.' })

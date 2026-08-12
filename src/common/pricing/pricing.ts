@@ -134,11 +134,14 @@ export function splitFee(
  *   delivered_ratio = min(verified, promised) / promised          (over-delivery capped at 100%)
  *   meets_threshold = verified ≥ τ × promised                     (below τ → reject, do not pay)
  *   delivered_gross = round(gross × min(verified, promised) / promised)
- *   fee / take      = splitFee(delivered_gross)                   (exact — no kobo lost)
- *   refund          = gross − delivered_gross                     → client wallet
+ *   fee             = splitFee(delivered_gross).fee               (promoter, pro-rata)
+ *   take            = gross − fee                                 (Ralia's cut + any undelivered remainder)
  *
- * fee + take + refund = gross exactly, so escrow conserves. Integer kobo
- * throughout; `promised` must be positive (a zero-reach promoter is never offered).
+ * fee + take = gross exactly, so escrow conserves. There is NO client refund:
+ * the platform has no client wallet, so an under-delivery is not returned — the
+ * promoter is paid for what they delivered and Ralia retains the remainder.
+ * Integer kobo throughout; `promised` must be positive (a zero-reach promoter is
+ * never offered).
  */
 export type SettlementConfig = {
   takeRateHundredths: number;
@@ -151,7 +154,6 @@ export type Settlement = {
   deliveredGrossMinor: bigint;
   promoterFeeMinor: bigint;
   raliaTakeMinor: bigint;
-  refundMinor: bigint;
 };
 
 export function settleDelivery(
@@ -174,10 +176,13 @@ export function settleDelivery(
   // Over-delivery is capped at the promised amount — the fee is a ceiling.
   const effective = Math.min(verifiedReach, promisedReach);
   const deliveredGrossMinor = divRound(grossMinor * BigInt(effective), BigInt(promisedReach));
-  const { promoterFeeMinor, raliaTakeMinor } = splitFee(deliveredGrossMinor, config);
-  const refundMinor = grossMinor - deliveredGrossMinor;
+  // Promoter is paid pro-rata on what they delivered; Ralia keeps the rest of the
+  // slot gross (its take on the delivered portion PLUS any undelivered remainder).
+  // No client refund — there is no client wallet to return it to.
+  const { promoterFeeMinor } = splitFee(deliveredGrossMinor, config);
+  const raliaTakeMinor = grossMinor - promoterFeeMinor;
 
-  return { meetsThreshold, deliveredGrossMinor, promoterFeeMinor, raliaTakeMinor, refundMinor };
+  return { meetsThreshold, deliveredGrossMinor, promoterFeeMinor, raliaTakeMinor };
 }
 
 /**

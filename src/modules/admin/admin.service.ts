@@ -408,9 +408,10 @@ export class AdminService {
 
   /**
    * Approve proof and pay the promoter pro-rata on the verified views
-   * (ALGORITHMS.md §2). The delivered fee, Ralia's take, and the client's refund
-   * of the undelivered remainder all move in ONE balanced transaction, so escrow
-   * settles to exactly what it held for the slot and a retry can't strand any leg.
+   * (ALGORITHMS.md §2). The delivered fee and Ralia's take move in ONE balanced
+   * transaction, so escrow settles to exactly what it held for the slot and a
+   * retry can't strand any leg. There is no client refund — an under-delivery is
+   * retained by the platform, not returned (there is no client wallet).
    *
    * A delivery below the threshold cannot be approved here — it is rejected so the
    * promoter can resubmit, which is the §2 delivery floor.
@@ -447,6 +448,9 @@ export class AdminService {
       throw new BadRequestException('This assignment has no promised reach recorded, so it cannot be settled pro-rata.');
     }
 
+    // The client only ever hears about verified, admin-approved work — so the owner
+    // is resolved here and notified from inside the approval, never from a promoter action.
+    const ownerId = await this.campaignOwnerId(campaign.clientOrgId);
     const config = await this.rateConfig.getSettlementConfig();
     const settlement = settleDelivery(assignment.grossMinor, verifiedViews, assignment.promisedReach, config);
 
@@ -462,20 +466,15 @@ export class AdminService {
       AccountKind.PROMOTER_AVAILABLE,
       assignment.promoterId,
     );
-    const clientWalletAccountId = await this.ledger.getOrCreateAccount(
-      AccountKind.CLIENT_WALLET,
-      campaign.clientOrgId,
-    );
 
-    // Fee, take and the undelivered refund all move out of escrow together.
+    // The delivered fee and Ralia's take (which retains any undelivered remainder)
+    // move out of escrow together — no client refund.
     const { replayed } = await this.ledger.settleSubmission({
       submissionId,
       escrowAccountId: campaign.escrowAccountId,
       promoterAccountId,
-      clientWalletAccountId,
       feeMinor: settlement.promoterFeeMinor,
       takeMinor: settlement.raliaTakeMinor,
-      refundMinor: settlement.refundMinor,
       idempotencyKey,
       actorId: adminId,
     });
@@ -514,6 +513,48 @@ export class AdminService {
           },
           tx,
         );
+
+        // Client-facing, and only ever from this admin-verified point: the client
+        // learns a delivery landed once we've confirmed its quality — never straight
+        // from a promoter's submission. Keeps the client's view to approved work only.
+        if (ownerId) {
+          await this.notifications.create(
+            {
+              userId: ownerId,
+              type: 'campaign.evidence_verified',
+              title: 'New verified delivery',
+              body: `A promoter's post on "${campaign.name}" passed review with ${verifiedViews.toLocaleString('en-NG')} verified views. See it in your evidence gallery.`,
+              data: { campaignId: campaign.id, submissionId, verifiedViews },
+              dedupeKey: `campaign.evidence_verified:${submissionId}`,
+            },
+            tx,
+          );
+        }
+
+        // Fulfilment is decided here, at the admin approval that pays the last slot:
+        // when every promised slot has a PAID delivery, the campaign is FULFILLED and
+        // the client is told. (This transition had no owner before — see handoff gap.)
+        if (campaign.status === CampaignStatus.LIVE) {
+          const paidCount = await tx.assignment.count({
+            where: { campaignId: campaign.id, status: AssignmentStatus.PAID },
+          });
+          if (paidCount >= campaign.slotsTotal) {
+            await tx.campaign.update({ where: { id: campaign.id }, data: { status: CampaignStatus.FULFILLED } });
+            if (ownerId) {
+              await this.notifications.create(
+                {
+                  userId: ownerId,
+                  type: 'campaign.fulfilled',
+                  title: 'Campaign fulfilled 🎉',
+                  body: `"${campaign.name}" is complete — every slot delivered and passed review. Open it to see the full evidence gallery and export your report.`,
+                  data: { campaignId: campaign.id },
+                  dedupeKey: `campaign.fulfilled:${campaign.id}`,
+                },
+                tx,
+              );
+            }
+          }
+        }
         await this.audit.record(
           {
             actorId: adminId,
@@ -528,7 +569,6 @@ export class AdminService {
               promisedReach: assignment.promisedReach,
               feeMinor: settlement.promoterFeeMinor,
               takeMinor: settlement.raliaTakeMinor,
-              refundMinor: settlement.refundMinor,
             },
           },
           tx,

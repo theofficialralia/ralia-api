@@ -251,22 +251,32 @@ describe('admin — decisions, money and audit', () => {
     expect(note.body).toMatch(/approved/i);
   });
 
-  it('partial delivery above the threshold pays pro-rata and refunds the client the remainder', async () => {
+  it('partial delivery above the threshold pays pro-rata; the remainder is retained by Ralia, not refunded', async () => {
     const { submissionId, promoterId, campaignId, adminId } = await makePendingSubmission();
     const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
     const escrow = await prisma.account.findFirstOrThrow({ where: { kind: AccountKind.CAMPAIGN_ESCROW } });
 
     // promised 1000, verified 800 (≥ 70%). delivered_gross = 3450×800/1000 = 2760;
-    // fee = round(2760×0.5) = 1380, take = 1380, refund = 3450 − 2760 = 690.
+    // fee = round(2760×0.5) = 1380. Ralia keeps the rest of the slot gross: 3450 − 1380 = 2070.
     await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: 800 }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
 
     expect(await balanceOf(AccountKind.PROMOTER_AVAILABLE, promoterId)).toBe(1380n);
-    expect(await balanceOf(AccountKind.RALIA_REVENUE)).toBe(1380n);
-    expect(await balanceOf(AccountKind.CLIENT_WALLET, campaign.clientOrgId)).toBe(690n); // refund
-    expect(await balanceOfAccount(escrow.id, AccountKind.CAMPAIGN_ESCROW)).toBe(0n); // 2760 + 690 = 3450
+    expect(await balanceOf(AccountKind.RALIA_REVENUE)).toBe(2070n); // take on delivered + undelivered remainder
+    expect(await balanceOf(AccountKind.CLIENT_WALLET, campaign.clientOrgId)).toBe(0n); // no refund — no client wallet
+    expect(await balanceOfAccount(escrow.id, AccountKind.CAMPAIGN_ESCROW)).toBe(0n); // 1380 + 2070 = 3450
 
     const submission = await prisma.submission.findUniqueOrThrow({ where: { id: submissionId } });
     expect(submission.verifiedReach).toBe(800);
+
+    // The last (only) slot is paid, so the campaign is fulfilled — and the client is
+    // told, but only from this admin-verified point (never from the promoter's submit).
+    const done = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+    expect(done.status).toBe(CampaignStatus.FULFILLED);
+    const ownerId = (await prisma.notification.findFirstOrThrow({ where: { type: 'campaign.live' } })).userId;
+    const verified = await prisma.notification.findFirst({ where: { userId: ownerId, type: 'campaign.evidence_verified' } });
+    expect(verified?.body).toMatch(/verified views/i);
+    const fulfilled = await prisma.notification.findFirst({ where: { userId: ownerId, type: 'campaign.fulfilled' } });
+    expect(fulfilled?.body).toMatch(/complete/i);
   });
 
   it('a delivery below the threshold is refused and moves no money', async () => {
