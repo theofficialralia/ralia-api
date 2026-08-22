@@ -16,13 +16,21 @@ export class LocalStorageProvider implements StorageProvider {
   private readonly root = join(process.cwd(), 'uploads');
   private readonly bucket = process.env.S3_BUCKET ?? 'ralia-dev';
 
+  /** Environment folder (prod/staging/dev/local) prefixed onto every object key. */
+  constructor(private readonly folder = '') {}
+
+  private scoped(key: string): string {
+    return this.folder ? `${this.folder}/${key.replace(/^\/+/, '')}` : key;
+  }
+
   async put(key: string, body: Buffer, mimeType: string): Promise<StoredObject> {
-    const path = join(this.root, key);
+    const scopedKey = this.scoped(key);
+    const path = join(this.root, scopedKey);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, body);
 
     return {
-      key,
+      key: scopedKey,
       bucket: this.bucket,
       sizeBytes: body.byteLength,
       checksumSha256: createHash('sha256').update(body).digest('hex'),

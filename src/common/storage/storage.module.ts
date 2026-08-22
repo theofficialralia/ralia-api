@@ -19,16 +19,21 @@ import { STORAGE, StorageProvider } from './storage';
       useFactory: (): StorageProvider => {
         const logger = new Logger('StorageModule');
         const choice = (process.env.STORAGE_PROVIDER ?? 'local').toLowerCase();
+        // Per-environment folder every object is nested under: prod/staging/dev/local.
+        const folder = (process.env.STORAGE_FOLDER ?? process.env.NODE_ENV ?? 'local')
+          .toLowerCase()
+          .replace(/[^a-z0-9/_-]/g, '')
+          .replace(/^\/+|\/+$/g, '');
         if (choice === 'cloudinary') {
-          const cloudinary = CloudinaryStorageProvider.fromEnv();
+          const cloudinary = CloudinaryStorageProvider.fromEnv(folder);
           if (cloudinary) {
-            logger.log('Storage provider: cloudinary');
+            logger.log(`Storage provider: cloudinary (folder: ${folder || 'none'})`);
             return cloudinary;
           }
           logger.warn('STORAGE_PROVIDER=cloudinary but no CLOUDINARY_URL / credentials found — falling back to local disk.');
         }
-        logger.log('Storage provider: local (dev disk)');
-        return new LocalStorageProvider();
+        logger.log(`Storage provider: local (dev disk, folder: ${folder || 'none'})`);
+        return new LocalStorageProvider(folder);
       },
     },
   ],

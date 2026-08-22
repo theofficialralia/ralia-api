@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { StorageProvider, StoredObject } from './storage';
 
-type CloudinaryConfig = { cloudName: string; apiKey: string; apiSecret: string };
+type CloudinaryConfig = { cloudName: string; apiKey: string; apiSecret: string; folder?: string };
 
 /** image/* → image, video/* → video, everything else → raw (PDFs, etc.). */
 function resourceType(mime: string): 'image' | 'video' | 'raw' {
@@ -28,16 +28,16 @@ export class CloudinaryStorageProvider implements StorageProvider {
   constructor(private readonly cfg: CloudinaryConfig) {}
 
   /** Build from CLOUDINARY_URL (cloudinary://key:secret@cloud) or the discrete vars. Null if unset. */
-  static fromEnv(): CloudinaryStorageProvider | null {
+  static fromEnv(folder = ''): CloudinaryStorageProvider | null {
     const url = process.env.CLOUDINARY_URL;
     if (url) {
       const m = /^cloudinary:\/\/([^:]+):([^@]+)@(.+)$/.exec(url.trim());
-      if (m) return new CloudinaryStorageProvider({ apiKey: m[1]!, apiSecret: m[2]!, cloudName: m[3]! });
+      if (m) return new CloudinaryStorageProvider({ apiKey: m[1]!, apiSecret: m[2]!, cloudName: m[3]!, folder });
     }
     const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
     const apiKey = process.env.CLOUDINARY_API_KEY;
     const apiSecret = process.env.CLOUDINARY_API_SECRET;
-    if (cloudName && apiKey && apiSecret) return new CloudinaryStorageProvider({ cloudName, apiKey, apiSecret });
+    if (cloudName && apiKey && apiSecret) return new CloudinaryStorageProvider({ cloudName, apiKey, apiSecret, folder });
     return null;
   }
 
@@ -49,7 +49,9 @@ export class CloudinaryStorageProvider implements StorageProvider {
   }
 
   async put(key: string, body: Buffer, mimeType: string): Promise<StoredObject> {
-    const publicId = key.replace(/^\/+/, '');
+    // Prefix the environment folder (prod/staging/dev/local) so each env's assets
+    // live under their own Cloudinary folder.
+    const publicId = [this.cfg.folder, key].filter(Boolean).join('/').replace(/^\/+/, '');
     const timestamp = String(Math.floor(Date.now() / 1000));
     const signature = this.sign({ public_id: publicId, timestamp });
     const type = resourceType(mimeType);
