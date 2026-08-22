@@ -34,7 +34,7 @@ async function bootstrap(): Promise<void> {
 
   const docsPath = setupSwagger(app);
 
-  const port = Number(process.env.PORT ?? 3000);
+  const port = Number(process.env.PORT ?? 6100);
   await app.listen(port, '127.0.0.1');
 
   if (docsPath) {

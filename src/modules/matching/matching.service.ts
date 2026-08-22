@@ -464,6 +464,94 @@ export class MatchingService {
     }));
   }
 
+  /**
+   * One accepted assignment, everything the promoter needs to act on it: the
+   * channel they were matched on (read-only), their click-recording tracking link,
+   * the poster + caption to post, the earn range, and their latest submission.
+   * Scoped to the owner — another promoter's id 404s.
+   */
+  async assignmentDetail(promoterId: string, id: string) {
+    const a = await this.prisma.assignment.findFirst({
+      where: { id, promoterId },
+      include: {
+        campaign: {
+          select: {
+            name: true,
+            objective: true,
+            promoterInstructions: true,
+            destinationUrl: true,
+            roleConfig: true,
+            assets: {
+              orderBy: { orderIndex: 'asc' },
+              select: { kind: true, captionText: true, file: { select: { id: true, mimeType: true, sizeBytes: true } } },
+            },
+          },
+        },
+        channel: { select: { platform: true, handle: true, effectiveReach: true } },
+        trackingLink: { select: { token: true } },
+        submissions: {
+          orderBy: { submittedAt: 'desc' },
+          take: 1,
+          select: { claimedViews: true, verifiedReach: true, verdict: true, rejectReason: true, artifacts: { take: 1, select: { file: { select: { id: true } } } } },
+        },
+      },
+    });
+    if (!a) throw new NotFoundException('No such assignment.');
+
+    const clicks = a.trackingLink
+      ? await this.prisma.clickEvent.count({ where: { token: a.trackingLink.token, isBot: false } })
+      : 0;
+
+    // Earn range: the promoter fee scales pro-rata with delivery, so the floor is
+    // the fee at the delivery threshold τ and the ceiling is the full fee.
+    const settle = await this.rateConfig.getSettlementConfig();
+    const feeMax = Number(a.feeMinor);
+    const feeMin = Math.round((feeMax * settle.deliveryThresholdPct) / 100);
+
+    const assets = a.campaign.assets;
+    const posterAsset = assets.find((x) => x.kind === 'POSTER' && x.file) ?? assets.find((x) => x.kind === 'IMAGE' && x.file);
+    const captionAsset = assets.find((x) => x.kind === 'CAPTION' && x.captionText);
+    const sub = a.submissions[0];
+    const trackingBase = process.env.TRACKING_BASE_URL ?? process.env.APP_BASE_URL ?? 'http://localhost:6100';
+
+    return {
+      id: a.id,
+      campaign_id: a.campaignId,
+      campaign_name: a.campaign.name,
+      objective: a.campaign.objective,
+      role: a.role,
+      status: a.status,
+      fee: toMoney(a.feeMinor),
+      fee_min: toMoney(BigInt(feeMin)),
+      promised_reach: a.promisedReach,
+      due_at: a.dueAt?.toISOString() ?? null,
+      clicks,
+      instructions: a.campaign.promoterInstructions,
+      task: describeRoleTask(a.role, asRoleConfig(a.campaign.roleConfig)),
+      destination_url: a.campaign.destinationUrl,
+      // The link the promoter shares — routes through /r/:token so clicks are recorded.
+      tracking_url: a.trackingLink ? `${trackingBase}/r/${a.trackingLink.token}` : null,
+      channel: a.channel
+        ? { platform: a.channel.platform, handle: a.channel.handle, effective_reach: a.channel.effectiveReach }
+        : null,
+      poster: posterAsset?.file
+        ? { url: `/v1/files/${posterAsset.file.id}`, mime_type: posterAsset.file.mimeType, size_bytes: posterAsset.file.sizeBytes }
+        : null,
+      caption: captionAsset?.captionText ?? null,
+      latest_verdict: sub?.verdict ?? null,
+      reject_reason: sub?.rejectReason ?? null,
+      submission: sub
+        ? {
+            image_url: sub.artifacts[0]?.file ? `/v1/files/${sub.artifacts[0].file.id}` : null,
+            claimed_views: sub.claimedViews,
+            verified_reach: sub.verifiedReach,
+            verdict: sub.verdict,
+            platform: a.channel?.platform ?? null,
+          }
+        : null,
+    };
+  }
+
   // ── Helpers ──────────────────────────────────────────────
 
   /**

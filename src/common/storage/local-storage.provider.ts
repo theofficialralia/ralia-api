@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { StorageProvider, StoredObject } from './storage';
 
@@ -28,6 +28,10 @@ export class LocalStorageProvider implements StorageProvider {
       checksumSha256: createHash('sha256').update(body).digest('hex'),
       mimeType,
     };
+  }
+
+  async read(key: string): Promise<Buffer> {
+    return readFile(join(this.root, key));
   }
 
   async signedUrl(key: string): Promise<string> {

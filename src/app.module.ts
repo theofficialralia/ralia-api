@@ -28,6 +28,7 @@ import { NotificationModule } from './modules/notifications/notification.module'
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
 import { TrackingModule } from './modules/tracking/tracking.module';
+import { FilesModule } from './modules/files/files.module';
 import { WalletModule } from './modules/wallet/wallet.module';
 
 @Module({
@@ -82,6 +83,7 @@ import { WalletModule } from './modules/wallet/wallet.module';
     PaymentsModule,
     MatchingModule,
     TrackingModule,
+    FilesModule,
     EvidenceModule,
     LedgerModule,
     AdminModule,

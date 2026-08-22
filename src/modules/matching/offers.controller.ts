@@ -55,4 +55,13 @@ export class AssignmentsController {
   myAssignments(@CurrentUser() user: AuthedUser) {
     return this.matching.myAssignments(user.id);
   }
+
+  @Get(':id')
+  @ApiOperation({
+    summary: 'One assignment in full',
+    description: 'Everything to act on an accepted assignment: the matched channel, the click-recording tracking link, poster + caption, the earn range, and the latest submission.',
+  })
+  assignmentDetail(@CurrentUser() user: AuthedUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.matching.assignmentDetail(user.id, id);
+  }
 }
