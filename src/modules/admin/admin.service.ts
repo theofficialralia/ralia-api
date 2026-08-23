@@ -278,24 +278,29 @@ export class AdminService {
     return { id: campaignId, status: CampaignStatus.CONFIRMING_PAYMENT, message: 'Campaign approved; awaiting payment.' };
   }
 
-  async rejectCampaign(adminId: string, campaignId: string, reason: string): Promise<AdminDecisionDto> {
+  async rejectCampaign(adminId: string, campaignId: string, reason: string, terminal = false): Promise<AdminDecisionDto> {
     const campaign = await this.prisma.campaign.findUnique({ where: { id: campaignId } });
     if (!campaign) throw new NotFoundException('No such campaign.');
     if (campaign.status !== CampaignStatus.PENDING_APPROVAL) {
       throw new ConflictException(`A ${campaign.status} campaign is not awaiting approval.`);
     }
 
+    // Two-type reject: "temporary" (default) → REJECTED, the owner can edit and
+    // resubmit; "entirely"/terminal → CANCELLED, not resubmittable.
+    const nextStatus = terminal ? CampaignStatus.CANCELLED : CampaignStatus.REJECTED;
     const ownerId = await this.campaignOwnerId(campaign.clientOrgId);
     await this.prisma.$transaction(async (tx) => {
-      await tx.campaign.update({ where: { id: campaignId }, data: { status: CampaignStatus.REJECTED, rejectReason: reason } });
+      await tx.campaign.update({ where: { id: campaignId }, data: { status: nextStatus, rejectReason: reason } });
       if (ownerId) {
         await this.notifications.create(
           {
             userId: ownerId,
             type: 'campaign.rejected',
-            title: 'Campaign needs changes',
-            body: `"${campaign.name}" wasn't approved: ${reason} Edit and resubmit it for review.`,
-            data: { campaignId, reason },
+            title: terminal ? 'Campaign rejected' : 'Campaign needs changes',
+            body: terminal
+              ? `"${campaign.name}" was rejected and can't be resubmitted: ${reason}`
+              : `"${campaign.name}" wasn't approved: ${reason} Edit and resubmit it for review.`,
+            data: { campaignId, reason, terminal },
             dedupeKey: `campaign.rejected:${campaignId}`,
           },
           tx,
@@ -989,10 +994,18 @@ export class AdminService {
     const totalClicks = await this.prisma.clickEvent.count({
       where: { isBot: false, trackingLink: { assignment: { campaignId } } },
     });
+    // Expected reach = total promised by accepted promoters; confirmed = admin-verified
+    // reach across approved submissions. Powers the Submissions-tab stat cards.
+    const [expectedAgg, confirmedAgg] = await Promise.all([
+      this.prisma.assignment.aggregate({ where: { campaignId }, _sum: { promisedReach: true } }),
+      this.prisma.submission.aggregate({ where: { assignment: { campaignId }, verdict: Verdict.APPROVED }, _sum: { verifiedReach: true } }),
+    ]);
     return {
       id: c.id,
       name: c.name,
       status: c.status,
+      expected_reach: expectedAgg._sum.promisedReach ?? 0,
+      confirmed_reach: confirmedAgg._sum.verifiedReach ?? 0,
       objective: c.objective,
       total_clicks: totalClicks,
       description: c.description,

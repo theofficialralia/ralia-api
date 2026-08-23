@@ -145,7 +145,7 @@ export class AdminController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RejectDto,
   ): Promise<AdminDecisionDto> {
-    return this.admin.rejectCampaign(admin.id, id, dto.reason);
+    return this.admin.rejectCampaign(admin.id, id, dto.reason, dto.terminal ?? false);
   }
 
   @Post('campaigns/:id/fund')

@@ -423,6 +423,45 @@ export class MatchingService {
     await this.prisma.offer.update({ where: { id: offerId }, data: { status: OfferStatus.DECLINED } });
   }
 
+  /**
+   * Admin monitoring view for a campaign: everyone the offer reached, each with
+   * accept status, reach and fit — plus the eligible / accepted / unanswered
+   * counts. Offers are auto-allocated to eligible promoters; this is the roster,
+   * and `sendOffers` tops it up manually.
+   */
+  async campaignOfferRoster(campaignId: string) {
+    const now = new Date();
+    const offers = await this.prisma.offer.findMany({
+      where: { campaignId },
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      include: {
+        promoter: { select: { phoneE164: true, promoterProfile: { select: { fullName: true, locationState: true } } } },
+        channel: { select: { platform: true, effectiveReach: true } },
+      },
+    });
+    const accepted = offers.filter((o) => o.status === OfferStatus.ACCEPTED).length;
+    const unanswered = offers.filter((o) => o.status === OfferStatus.SENT && o.expiresAt > now).length;
+    const declined = offers.filter((o) => o.status === OfferStatus.DECLINED).length;
+    // Eligible pool = already offered + still-eligible-but-unoffered candidates.
+    const candidates = await this.candidates(campaignId);
+    return {
+      total_eligible: offers.length + candidates.length,
+      accepted,
+      unanswered,
+      declined,
+      roster: offers.map((o) => ({
+        promoter_id: o.promoterId,
+        full_name: o.promoter.promoterProfile?.fullName ?? null,
+        location_state: o.promoter.promoterProfile?.locationState ?? null,
+        phone_e164: o.promoter.phoneE164,
+        platform: o.channel.platform,
+        effective_reach: o.channel.effectiveReach,
+        fit_pct: o.score != null ? Math.round(o.score.toNumber() * 100) : null,
+        status: o.status,
+      })),
+    };
+  }
+
   // ── Promoter: my assignments (accepted work) ─────────────
 
   async myAssignments(promoterId: string) {

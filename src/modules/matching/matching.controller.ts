@@ -23,6 +23,12 @@ export class MatchingController {
     return this.matching.candidates(id);
   }
 
+  @Get('offers')
+  @ApiOperation({ summary: 'Offer roster: who was offered, accepted or unanswered, with reach and fit' })
+  offerRoster(@Param('id', ParseUUIDPipe) id: string) {
+    return this.matching.campaignOfferRoster(id);
+  }
+
   @Post('offers')
   @ApiOperation({ summary: 'Send offers to selected promoters' })
   @ApiCreatedResponse({ type: [OfferDto] })

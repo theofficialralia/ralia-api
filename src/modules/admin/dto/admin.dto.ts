@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { KycStatus, ReconciliationStatus, VerificationTier } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
-import { IsEnum, IsIn, IsInt, IsObject, IsOptional, IsPositive, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsIn, IsInt, IsObject, IsOptional, IsPositive, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { MoneyDto } from '../../ledger/money';
 
 /** Rejecting anything requires a reason (§6). */
@@ -12,6 +12,13 @@ export class RejectDto {
   @MaxLength(500)
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   reason!: string;
+
+  @ApiPropertyOptional({
+    description: 'Campaign reject only: true rejects it terminally (cancelled, not resubmittable); false/omitted lets the owner correct and resubmit.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  terminal?: boolean;
 }
 
 /** Admin override of a promoter's computed per-role capability (§3), 0–100 each. */
