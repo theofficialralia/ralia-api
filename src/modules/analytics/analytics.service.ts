@@ -131,7 +131,7 @@ export class AnalyticsService {
           verdict: s.verdict,
           auto_flag: s.autoFlag,
           public_url: s.publicUrl,
-          image_url: artifact?.file ? await this.storage.signedUrl(artifact.file.storageKey) : null,
+          image_url: artifact?.file ? `/v1/files/${artifact.file.id}` : null,
         };
       }),
     );

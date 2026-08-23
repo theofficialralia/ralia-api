@@ -1031,7 +1031,7 @@ export class AdminService {
     const rows = await this.prisma.submission.findMany({
       where: { verdict: Verdict.PENDING },
       include: {
-        artifacts: { select: { id: true, reuseOfId: true, file: { select: { storageKey: true } } } },
+        artifacts: { select: { id: true, reuseOfId: true, file: { select: { id: true } } } },
         assignment: {
           select: {
             id: true,
@@ -1068,8 +1068,9 @@ export class AdminService {
           auto_flag: s.autoFlag,
           public_url: s.publicUrl,
           note: s.note,
-          // Signed URL so the admin can open the actual screenshot to verify the count.
-          image_url: primary?.file ? await this.storage.signedUrl(primary.file.storageKey) : null,
+          // Provider-agnostic file route so the admin can open the actual screenshot
+          // to verify the count (streams for local, redirects to the CDN otherwise).
+          image_url: primary?.file ? `/v1/files/${primary.file.id}` : null,
           submitted_at: s.submittedAt.toISOString(),
           // reuse_of_id tells the admin this screenshot perceptually matched an earlier one.
           artifacts: s.artifacts.map((a) => ({ id: a.id, reuse_of_id: a.reuseOfId })),

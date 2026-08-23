@@ -89,6 +89,9 @@
     ],
     "rootDir": ".",
     "globalSetup": "<rootDir>/test/global-setup.ts",
+    "setupFiles": [
+      "<rootDir>/test/jest.setup.ts"
+    ],
     "testTimeout": 60000,
     "maxWorkers": 1,
     "testRegex": ".*\\.spec\\.ts$",

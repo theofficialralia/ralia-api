@@ -54,7 +54,7 @@ export class AssetsService {
               id: a.file.id,
               mime_type: a.file.mimeType,
               size_bytes: a.file.sizeBytes,
-              url: await this.storage.signedUrl(a.file.storageKey),
+              url: `/v1/files/${a.file.id}`,
             }
           : null,
       })),
@@ -131,7 +131,7 @@ export class AssetsService {
             id: asset.file.id,
             mime_type: asset.file.mimeType,
             size_bytes: asset.file.sizeBytes,
-            url: await this.storage.signedUrl(asset.file.storageKey),
+            url: `/v1/files/${asset.file.id}`,
           }
         : null,
     };
