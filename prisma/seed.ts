@@ -72,7 +72,23 @@ const STATES = [
 ] as const;
 
 const LANGUAGES = ['English', 'Pidgin', 'Hausa', 'Yoruba', 'Igbo', 'Fulfulde', 'Tiv', 'Efik'] as const;
-const CATEGORIES = ['Fashion', 'Tech', 'Food', 'Finance', 'Health', 'Education', 'Entertainment', 'Sports', 'Beauty', 'Travel'] as const;
+// Canonical Category-of-Interest taxonomy (dev-support spec R736-GEN-OD-00001) —
+// matches the client + promoter apps so categoryFit lines up.
+const CATEGORIES = [
+  'Technology & Digital Products',
+  'Financial Services & Fintech',
+  'Consumer Goods & Retail (FMCG)',
+  'Lifestyle & Personal Care',
+  'Health & Pharmaceuticals',
+  'Entertainment, Media & Gaming',
+  'Real Estate & Construction',
+  'Travel',
+  'Hospitality & Leisure',
+  'Education & Career Services',
+  'Mobility',
+  'Logistics & Utilities',
+  'Other / General',
+] as const;
 const PLATFORMS = Object.values(Platform);
 const TIERS = Object.values(VerificationTier);
 const GENDERS = Object.values(Gender);
@@ -173,8 +189,8 @@ async function main() {
   console.log('→ 2 clients');
   const clientOrgs = [];
   const clientSpecs = [
-    { email: 'client1@ralia.test', phone: '+2348010000001', org: 'Naija Threads', industry: 'Fashion' },
-    { email: 'client2@ralia.test', phone: '+2348010000002', org: 'PayFlow NG', industry: 'Finance' },
+    { email: 'client1@ralia.test', phone: '+2348010000001', org: 'Naija Threads', industry: 'Consumer Goods & Retail (FMCG)' },
+    { email: 'client2@ralia.test', phone: '+2348010000002', org: 'PayFlow NG', industry: 'Financial Services & Fintech' },
   ];
   for (const spec of clientSpecs) {
     const user = await prisma.user.create({
@@ -342,7 +358,7 @@ async function main() {
       org: clientOrgs[0]!,
       name: 'Naija Threads — Harmattan Drop',
       objective: CampaignObjective.AWARENESS,
-      categories: ['Fashion', 'Beauty'],
+      categories: ['Consumer Goods & Retail (FMCG)', 'Lifestyle & Personal Care'],
       platforms: [Platform.WHATSAPP_STATUS, Platform.INSTAGRAM, Platform.TIKTOK],
       roles: [PromoterRole.DISTRIBUTOR, PromoterRole.CREATOR],
       status: CampaignStatus.LIVE,
@@ -353,7 +369,7 @@ async function main() {
       org: clientOrgs[1]!,
       name: 'PayFlow — Merchant Signup Push',
       objective: CampaignObjective.LEAD_GEN,
-      categories: ['Finance', 'Tech'],
+      categories: ['Financial Services & Fintech', 'Technology & Digital Products'],
       platforms: [Platform.WHATSAPP_GROUP, Platform.X, Platform.LINKEDIN],
       roles: [PromoterRole.PARTICIPATOR, PromoterRole.INFLUENCER],
       status: CampaignStatus.PENDING_APPROVAL,
@@ -364,7 +380,7 @@ async function main() {
       org: clientOrgs[0]!,
       name: 'Naija Threads — Campus Ambassadors',
       objective: CampaignObjective.WEBSITE_VISIT,
-      categories: ['Fashion', 'Entertainment'],
+      categories: ['Lifestyle & Personal Care', 'Entertainment, Media & Gaming'],
       platforms: [Platform.WHATSAPP_STATUS, Platform.FACEBOOK, Platform.TELEGRAM, Platform.OFFLINE],
       roles: [PromoterRole.DISTRIBUTOR],
       status: CampaignStatus.DRAFT,
