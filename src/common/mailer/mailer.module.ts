@@ -20,7 +20,7 @@ import { LogMailer, SmtpMailer } from './smtp.mailer';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
         const transport = config.get<string>('MAIL_TRANSPORT');
-        const from = config.get<string>('MAIL_FROM') ?? 'Ralia <no-reply@ralia.local>';
+        const from = config.get<string>('MAIL_FROM') ?? 'Ralia <no-reply@ralia.co>';
         const resendKey = config.get<string>('RESEND_API_KEY');
         const host = config.get<string>('SMTP_HOST');
 
