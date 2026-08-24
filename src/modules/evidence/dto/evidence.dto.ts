@@ -1,9 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Verdict } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, IsUrl, MaxLength, Min } from 'class-validator';
+import { IsInt, IsOptional, IsString, IsUUID, IsUrl, MaxLength, Min } from 'class-validator';
 
 export class CreateSubmissionDto {
+  @ApiPropertyOptional({ format: 'uuid', description: 'Which scheduled post this proof answers. Omit to answer the earliest post still awaiting proof.' })
+  @IsOptional()
+  @IsUUID()
+  delivery_slot_id?: string;
+
   @ApiPropertyOptional({
     example: 'https://instagram.com/p/abc123',
     description: 'Optional — a WhatsApp status has no public URL.',
@@ -34,6 +39,9 @@ export class SubmissionDto {
 
   @ApiProperty({ format: 'uuid' })
   assignment_id!: string;
+
+  @ApiPropertyOptional({ format: 'uuid', nullable: true, description: 'The scheduled post this proof answers.' })
+  delivery_slot_id?: string | null;
 
   @ApiProperty({ enum: Verdict, description: 'Always PENDING on creation — nothing auto-approves.' })
   verdict!: Verdict;

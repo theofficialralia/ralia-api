@@ -8,6 +8,7 @@
 import {
   AccountKind,
   AssetKind,
+  Cadence,
   CampaignObjective,
   CampaignStatus,
   ChannelStatus,
@@ -125,11 +126,13 @@ async function wipe() {
   await prisma.submission.deleteMany();
   await prisma.clickEvent.deleteMany();
   await prisma.trackingLink.deleteMany();
+  await prisma.deliverySlot.deleteMany();
   await prisma.assignment.deleteMany();
   await prisma.offer.deleteMany();
   await prisma.campaignSlot.deleteMany();
   await prisma.campaignTargeting.deleteMany();
   await prisma.campaignAsset.deleteMany();
+  await prisma.gatewayPayment.deleteMany();
   await prisma.campaign.deleteMany();
   await prisma.channel.deleteMany();
   await prisma.promoterBankAccount.deleteMany();
@@ -351,6 +354,8 @@ async function main() {
     status: CampaignStatus;
     slots: number;
     unitPriceMinor: bigint;
+    cadence: Cadence;
+    postsRequired: number;
   };
 
   const campaignSpecs: CampaignSpec[] = [
@@ -364,6 +369,9 @@ async function main() {
       status: CampaignStatus.LIVE,
       slots: 12,
       unitPriceMinor: 45000n,
+      // §multi-day demo: a daily campaign — each promoter posts 5 times over the run.
+      cadence: Cadence.DAILY,
+      postsRequired: 5,
     },
     {
       org: clientOrgs[1]!,
@@ -375,6 +383,8 @@ async function main() {
       status: CampaignStatus.PENDING_APPROVAL,
       slots: 8,
       unitPriceMinor: 90000n,
+      cadence: Cadence.ONE_OFF,
+      postsRequired: 1,
     },
     {
       org: clientOrgs[0]!,
@@ -386,12 +396,15 @@ async function main() {
       status: CampaignStatus.DRAFT,
       slots: 20,
       unitPriceMinor: 30000n,
+      cadence: Cadence.ONE_OFF,
+      postsRequired: 1,
     },
   ];
 
   for (let i = 0; i < campaignSpecs.length; i++) {
     const spec = campaignSpecs[i]!;
-    const priceMinor = spec.unitPriceMinor * BigInt(spec.slots);
+    // §multi-day: N posts per slot scales the price.
+    const priceMinor = spec.unitPriceMinor * BigInt(spec.slots) * BigInt(spec.postsRequired);
     const isPriced = spec.status !== CampaignStatus.DRAFT;
 
     const escrow = await prisma.account.create({
@@ -408,6 +421,8 @@ async function main() {
         destinationUrl: 'https://example.test/landing',
         status: spec.status,
         needsCreative: spec.roles.includes(PromoterRole.CREATOR),
+        cadence: spec.cadence,
+        postsRequired: spec.postsRequired,
         budgetMinor: priceMinor,
         priceMinor: isPriced ? priceMinor : null,
         quotedAt: isPriced ? new Date() : null,
@@ -445,6 +460,7 @@ async function main() {
         campaignId: campaign.id,
         role: spec.roles[0]!,
         unitPriceMinor: spec.unitPriceMinor,
+        postsRequired: spec.postsRequired,
         status: SlotStatus.OPEN,
       })),
     });

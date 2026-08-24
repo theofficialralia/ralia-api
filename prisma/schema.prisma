@@ -449,6 +449,23 @@ enum SlotStatus {
   CANCELLED
 }
 
+/// How a campaign's posts are spaced over its run window (§multi-day).
+enum Cadence {
+  ONE_OFF
+  DAILY
+  WEEKLY
+  CUSTOM
+}
+
+/// Lifecycle of a single scheduled post within an assignment.
+enum DeliverySlotStatus {
+  PENDING
+  SUBMITTED
+  APPROVED
+  REJECTED
+  MISSED
+}
+
 model Campaign {
   id                  String            @id @default(uuid()) @db.Uuid
   clientOrgId         String            @map("client_org_id") @db.Uuid
@@ -467,6 +484,12 @@ model Campaign {
   designBrief         String?           @map("design_brief")
   status              CampaignStatus    @default(DRAFT)
   needsCreative       Boolean           @default(false) @map("needs_creative")
+  // §multi-day: how many separate posts each promoter delivers over the run
+  // window (1 = a one-off). cadence describes how those posts are spaced and
+  // drives postsRequired in the wizard. Slots (per-day proofs) are generated
+  // from this at accept time.
+  postsRequired       Int               @default(1) @map("posts_required")
+  cadence             Cadence           @default(ONE_OFF)
   budgetMinor         BigInt            @map("budget_minor")
   // The price this campaign was quoted. Frozen at quote time — a later
   // rate_config change must never reprice it (handoff §5.2).
@@ -540,6 +563,11 @@ model CampaignSlot {
   campaignId     String       @map("campaign_id") @db.Uuid
   role           PromoterRole
   unitPriceMinor BigInt       @map("unit_price_minor")
+  // §multi-day: how many posts the assignment filling this slot must deliver.
+  // Defaults to the campaign's postsRequired; a slot re-opened after a promoter
+  // fails carries the REMAINING post count so the replacement covers only what
+  // is left over the remaining window.
+  postsRequired  Int          @default(1) @map("posts_required")
   status         SlotStatus   @default(OPEN)
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
@@ -638,10 +666,42 @@ model Assignment {
   slot         CampaignSlot? @relation(fields: [slotId], references: [id])
   trackingLink TrackingLink?
   submissions  Submission[]
+  deliverySlots DeliverySlot[]
 
   @@index([promoterId, status])
   @@index([campaignId, status])
   @@map("assignments")
+}
+
+/// A single scheduled post within an assignment (§multi-day). A one-off campaign
+/// produces exactly one; a recurring campaign produces `postsRequired`, spread
+/// across the run window, each with its own internal deadline, per-post economics,
+/// and independent proof + settlement. This is what makes "submission for a
+/// specified day" possible.
+model DeliverySlot {
+  id            String             @id @default(uuid()) @db.Uuid
+  assignmentId  String             @map("assignment_id") @db.Uuid
+  // 1-based occurrence number — "Day {index} of N" in the UI.
+  index         Int
+  scheduledFor  DateTime           @map("scheduled_for")
+  // The promoter's internal deadline for THIS post (already inside the campaign's
+  // contingency buffer). Miss it and the sweeper marks the slot MISSED.
+  dueAt         DateTime           @map("due_at")
+  status        DeliverySlotStatus @default(PENDING)
+  // Per-post frozen economics, copied from the offer. Settlement runs per slot:
+  // settleDelivery(grossMinor, verifiedReach, promisedReach) on approval.
+  grossMinor    BigInt             @map("gross_minor")
+  feeMinor      BigInt             @map("fee_minor")
+  promisedReach Int                @map("promised_reach")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  assignment  Assignment   @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  submissions Submission[]
+
+  @@unique([assignmentId, index])
+  @@index([status, dueAt])
+  @@map("delivery_slots")
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -687,6 +747,9 @@ model ClickEvent {
 model Submission {
   id           String    @id @default(uuid()) @db.Uuid
   assignmentId String    @map("assignment_id") @db.Uuid
+  // §multi-day: which scheduled post this proof answers. Nullable only for legacy
+  // rows created before delivery slots existed; every new submission sets it.
+  deliverySlotId String? @map("delivery_slot_id") @db.Uuid
   submittedAt  DateTime  @default(now()) @map("submitted_at")
   publicUrl    String?   @map("public_url")
   note         String?
@@ -702,12 +765,14 @@ model Submission {
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
-  assignment Assignment      @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
-  reviewer   User?           @relation("SubmissionReviewer", fields: [reviewedBy], references: [id])
-  artifacts  ProofArtifact[]
+  assignment   Assignment    @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  deliverySlot DeliverySlot? @relation(fields: [deliverySlotId], references: [id])
+  reviewer     User?         @relation("SubmissionReviewer", fields: [reviewedBy], references: [id])
+  artifacts    ProofArtifact[]
 
   @@index([verdict, submittedAt])
   @@index([assignmentId])
+  @@index([deliverySlotId])
   @@map("submissions")
 }
 
@@ -964,6 +1029,12 @@ model RateConfig {
   // before auto-reclaim, and the ranked head-start window before open free-to-air.
   deliveryWindowHours    Int    @default(48) @map("delivery_window_hours")
   headStartHours         Int    @default(12) @map("head_start_hours")
+  // §multi-day: the internal contingency buffer. When a campaign has an end date,
+  // the promoter's per-assignment dueAt is set this many hours BEFORE the client's
+  // end date — the promoter's deadline is always shorter than the client's
+  // expectation, leaving room to reclaim + re-allocate a missed slot and still
+  // deliver on time. Ignored for campaigns with no end date (flat window applies).
+  contingencyBufferHours Int    @default(24) @map("contingency_buffer_hours")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

@@ -83,11 +83,14 @@ describe('AllocationService — sweeps (§8)', () => {
     return user.id;
   }
 
-  /** Accept an offer, then backdate the delivery deadline into the past. */
+  /** Accept an offer, then backdate the delivery deadline (assignment + its posts) into the past. */
   async function acceptThenOverdue(campaignId: string, promoterId: string): Promise<string> {
     const [offer] = await matching.sendOffers(campaignId, [promoterId]);
     const assignment = await matching.accept(offer!.id, promoterId);
-    await prisma.assignment.update({ where: { id: assignment.id }, data: { dueAt: new Date(Date.now() - 60_000) } });
+    const past = new Date(Date.now() - 60_000);
+    await prisma.assignment.update({ where: { id: assignment.id }, data: { dueAt: past } });
+    // §multi-day: reclaim keys off each scheduled post's deadline, so backdate those too.
+    await prisma.deliverySlot.updateMany({ where: { assignmentId: assignment.id }, data: { dueAt: past } });
     return assignment.id;
   }
 
@@ -117,10 +120,12 @@ describe('AllocationService — sweeps (§8)', () => {
     expect(note.body).toMatch(/expired/i);
   });
 
-  it('spares a SUBMITTED assignment — proof is in the review queue, not a no-show', async () => {
+  it('spares a SUBMITTED post — proof is in the review queue, not a no-show', async () => {
     const campaignId = await makeLiveCampaign(1);
     const promoterId = await makePromoter(60);
     const assignmentId = await acceptThenOverdue(campaignId, promoterId);
+    // §multi-day: a delivered post is SUBMITTED at the slot level — the sweep spares it.
+    await prisma.deliverySlot.updateMany({ where: { assignmentId }, data: { status: 'SUBMITTED' } });
     await prisma.assignment.update({ where: { id: assignmentId }, data: { status: AssignmentStatus.SUBMITTED } });
 
     const reclaimed = await allocation.reclaimOverdueAssignments(new Date());

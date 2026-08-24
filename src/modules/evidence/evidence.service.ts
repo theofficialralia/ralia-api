@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { AssignmentStatus, Submission, Verdict } from '@prisma/client';
+import { AssignmentStatus, DeliverySlotStatus, Submission, Verdict } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import { computeAssignmentRollup } from '../../common/delivery/delivery';
 import { DEFAULT_HAMMING_THRESHOLD, hammingDistance, perceptualHash } from '../../common/phash/phash';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { STORAGE, StorageProvider } from '../../common/storage/storage';
@@ -13,8 +14,8 @@ const ALLOWED_MIME: Record<string, true> = {
   'image/webp': true,
 };
 
-/** Assignment states from which a promoter may submit proof. */
-const SUBMITTABLE: AssignmentStatus[] = [AssignmentStatus.IN_PROGRESS, AssignmentStatus.REJECTED];
+/** Delivery-slot states from which a promoter may (re)submit proof for that post. */
+const SUBMITTABLE_SLOT: DeliverySlotStatus[] = [DeliverySlotStatus.PENDING, DeliverySlotStatus.REJECTED];
 
 @Injectable()
 export class EvidenceService {
@@ -40,15 +41,31 @@ export class EvidenceService {
     file: { buffer: Buffer; mimetype: string; size: number } | undefined,
     dto: CreateSubmissionDto,
   ): Promise<SubmissionDto> {
-    const assignment = await this.prisma.assignment.findUnique({ where: { id: assignmentId } });
+    const assignment = await this.prisma.assignment.findUnique({
+      where: { id: assignmentId },
+      include: { deliverySlots: true },
+    });
     // 404 rather than 403 for someone else's assignment — a 403 confirms the id.
     if (!assignment || assignment.promoterId !== promoterId) {
       throw new NotFoundException('No such assignment.');
     }
-    if (!SUBMITTABLE.includes(assignment.status)) {
+    if (assignment.status === AssignmentStatus.CANCELLED) {
+      throw new BadRequestException('This assignment is closed and is not awaiting proof.');
+    }
+
+    // §multi-day: proof answers a specific scheduled post. Use the one named by the
+    // promoter, or default to the earliest post still awaiting proof.
+    const slots = assignment.deliverySlots;
+    const target = dto.delivery_slot_id
+      ? slots.find((s) => s.id === dto.delivery_slot_id)
+      : [...slots].filter((s) => SUBMITTABLE_SLOT.includes(s.status)).sort((a, b) => a.index - b.index)[0];
+    if (!target) {
       throw new BadRequestException(
-        `This assignment is ${assignment.status.toLowerCase()} and is not awaiting proof.`,
+        dto.delivery_slot_id ? 'No such post on this assignment.' : 'No post is awaiting proof right now.',
       );
+    }
+    if (!SUBMITTABLE_SLOT.includes(target.status)) {
+      throw new BadRequestException(`Day ${target.index} is ${target.status.toLowerCase()} and is not awaiting proof.`);
     }
 
     if (!file) throw new BadRequestException('A screenshot is required.');
@@ -86,6 +103,7 @@ export class EvidenceService {
       const created = await tx.submission.create({
         data: {
           assignmentId,
+          deliverySlotId: target.id,
           publicUrl: dto.public_url ?? null,
           note: dto.note ?? null,
           claimedViews: dto.claimed_views ?? null,
@@ -98,10 +116,12 @@ export class EvidenceService {
         data: { submissionId: created.id, fileId: fileRow.id, phash, reuseOfId },
       });
 
-      await tx.assignment.update({
-        where: { id: assignmentId },
-        data: { status: AssignmentStatus.SUBMITTED },
-      });
+      // This post is now awaiting review; the assignment's status is the roll-up
+      // of all its posts.
+      await tx.deliverySlot.update({ where: { id: target.id }, data: { status: DeliverySlotStatus.SUBMITTED } });
+      const nextStatuses = slots.map((s) => (s.id === target.id ? { index: s.index, status: DeliverySlotStatus.SUBMITTED } : { index: s.index, status: s.status }));
+      const rollup = computeAssignmentRollup(nextStatuses);
+      await tx.assignment.update({ where: { id: assignmentId }, data: { status: rollup.status } });
 
       return created;
     });
@@ -154,6 +174,7 @@ function toDto(s: Submission): SubmissionDto {
   return {
     id: s.id,
     assignment_id: s.assignmentId,
+    delivery_slot_id: s.deliverySlotId,
     verdict: s.verdict,
     auto_flag: s.autoFlag,
     public_url: s.publicUrl,

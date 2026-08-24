@@ -296,6 +296,14 @@ export class RateConfigUpdateDto {
   @IsOptional() @IsInt() @Min(1)
   offer_expiry_hours?: number;
 
+  @ApiPropertyOptional({ example: 48, description: 'Flat delivery window (hours) for campaigns with no end date.' })
+  @IsOptional() @IsInt() @Min(1)
+  delivery_window_hours?: number;
+
+  @ApiPropertyOptional({ example: 24, description: 'Contingency buffer (hours): the promoter deadline sits this far before the client run-window end.' })
+  @IsOptional() @IsInt() @Min(0)
+  contingency_buffer_hours?: number;
+
   @ApiPropertyOptional({ example: 500000, description: 'Minimum withdrawal, kobo.' })
   @IsOptional() @IsInt() @Min(0)
   withdrawal_minimum_minor?: number;

@@ -388,18 +388,20 @@ describe('matching — candidates, offers, accept', () => {
     expect(await prisma.offer.count({ where: { campaignId, promoterId: p.userId } })).toBe(1);
   });
 
-  it('the offer fee is the promoter’s 50% share of the slot price', async () => {
+  it('the offer fee is the promoter’s 50% share of the SLOT price (not the promoter’s channel)', async () => {
     const campaignId = await makeLiveCampaign(5);
     const p = await makePromoter();
     const [offer] = await matching.sendOffers(campaignId, [p.userId]);
-    // Per-promoter pricing: reach 2000 (20k Instagram × 0.10 × screenshot 1.0),
-    // AWARENESS, no filters, Distribution slot (role DISTRIBUTOR → RPM 300,000/1,000)
-    // → gross (2000/1000)×300000 = 600000 → fee round(600000×0.5) = 300000.
-    expect(offer!.fee_minor).toBe(300000);
-    // The gross and promised reach are frozen on the row for settlement.
+    // A slot is worth what the client funded for it — the slot's frozen unit price
+    // (3450), NOT the promoter's own channel reach. gross = 3450 → fee round(3450×0.5)
+    // = 1725. This is what keeps a big-audience promoter from being promised more than
+    // the campaign's per-slot budget.
+    expect(offer!.fee_minor).toBe(1725);
+    // gross = slot unit price; promised reach = the reach the slot was priced for
+    // (Distribution default 1000 when the client set no floor), frozen for settlement.
     const row = await prisma.offer.findUniqueOrThrow({ where: { id: offer!.id } });
-    expect(row.grossMinor).toBe(600000n);
-    expect(row.promisedReach).toBe(2000);
+    expect(row.grossMinor).toBe(3450n);
+    expect(row.promisedReach).toBe(1000);
   });
 
   // ── Access control (HTTP) ────────────────────────────────

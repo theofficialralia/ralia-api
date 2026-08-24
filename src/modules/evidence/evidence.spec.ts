@@ -86,8 +86,8 @@ describe('evidence — submission and duplicate detection', () => {
     return sharp(raw, { raw: { width: w, height: h, channels: ch } }).png().toBuffer();
   }
 
-  /** A promoter holding an IN_PROGRESS assignment, ready to submit proof. */
-  async function makeAssignment(): Promise<{ assignmentId: string; promoterId: string }> {
+  /** A promoter holding an IN_PROGRESS assignment with one scheduled post, ready to submit proof. */
+  async function makeAssignment(): Promise<{ assignmentId: string; promoterId: string; deliverySlotId: string }> {
     const n = seq++;
     const owner = await prisma.user.create({ data: { email: `c${n}@x.com`, phoneE164: `+23481${String(n).padStart(8, '0')}`, passwordHash: 'x' } });
     const org = await prisma.clientOrg.create({ data: { ownerUserId: owner.id, name: `Org${n}` } });
@@ -105,9 +105,13 @@ describe('evidence — submission and duplicate detection', () => {
       data: { campaignId: campaign.id, promoterId: promoter.id, channelId: channel.id, role: PromoterRole.DISTRIBUTOR, feeMinor: 2100n, expiresAt: new Date(Date.now() + 1e6), status: 'ACCEPTED' },
     });
     const assignment = await prisma.assignment.create({
-      data: { offerId: offer.id, campaignId: campaign.id, promoterId: promoter.id, channelId: channel.id, slotId: slot.id, role: PromoterRole.DISTRIBUTOR, feeMinor: 2100n, trackingToken: randomBytes(12).toString('base64url'), status: AssignmentStatus.IN_PROGRESS },
+      data: { offerId: offer.id, campaignId: campaign.id, promoterId: promoter.id, channelId: channel.id, slotId: slot.id, role: PromoterRole.DISTRIBUTOR, feeMinor: 2100n, grossMinor: 3000n, promisedReach: 60, trackingToken: randomBytes(12).toString('base64url'), status: AssignmentStatus.IN_PROGRESS },
     });
-    return { assignmentId: assignment.id, promoterId: promoter.id };
+    // §multi-day: a one-off assignment has exactly one scheduled post.
+    const deliverySlot = await prisma.deliverySlot.create({
+      data: { assignmentId: assignment.id, index: 1, scheduledFor: new Date(Date.now() + 1e6), dueAt: new Date(Date.now() + 1e6), grossMinor: 3000n, feeMinor: 2100n, promisedReach: 60 },
+    });
+    return { assignmentId: assignment.id, promoterId: promoter.id, deliverySlotId: deliverySlot.id };
   }
 
   // ── The done-when ────────────────────────────────────────
@@ -277,6 +281,8 @@ describe('evidence — submission and duplicate detection', () => {
     const a = await makeAssignment();
     await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(a.promoterId)}` })
       .attach('file', await makeImage(12), { filename: 'a.png', contentType: 'image/png' }).expect(201);
+    // §multi-day: an admin rejection reopens the post at the slot level.
+    await prisma.deliverySlot.update({ where: { id: a.deliverySlotId }, data: { status: 'REJECTED' } });
     await prisma.assignment.update({ where: { id: a.assignmentId }, data: { status: AssignmentStatus.REJECTED } });
 
     await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(a.promoterId)}` })

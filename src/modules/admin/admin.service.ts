@@ -5,16 +5,19 @@ import {
   CampaignStatus,
   ChannelStatus,
   ClientOrgStatus,
+  DeliverySlotStatus,
   EntryDirection,
   KycStatus,
   Prisma,
   PromoterStatus,
   ReconciliationStatus,
   Role,
+  SlotStatus,
   VerificationTier,
   Verdict,
   WithdrawalStatus,
 } from '@prisma/client';
+import { computeAssignmentRollup } from '../../common/delivery/delivery';
 import { settleDelivery } from '../../common/pricing/pricing';
 import { asRoleConfig, describeRoleTask } from '../../common/campaign/role-task';
 import { channelEffectiveReach } from '../../common/reach/effective-reach';
@@ -429,7 +432,7 @@ export class AdminService {
   ): Promise<AdminDecisionDto> {
     const submission = await this.prisma.submission.findUnique({
       where: { id: submissionId },
-      include: { assignment: { include: { campaign: true } } },
+      include: { assignment: { include: { campaign: true, deliverySlots: true } }, deliverySlot: true },
     });
     if (!submission) throw new NotFoundException('No such submission.');
 
@@ -449,21 +452,28 @@ export class AdminService {
     if (!campaign.escrowAccountId) {
       throw new BadRequestException('This campaign was never funded — there is nothing to pay from.');
     }
-    if (assignment.promisedReach <= 0) {
-      throw new BadRequestException('This assignment has no promised reach recorded, so it cannot be settled pro-rata.');
+
+    // §multi-day: settle against THIS post's per-slot economics. Legacy submissions
+    // with no slot fall back to the assignment-level figures (pre-slot rows).
+    const slot = submission.deliverySlot;
+    const grossBasis = slot ? slot.grossMinor : assignment.grossMinor;
+    const reachBasis = slot ? slot.promisedReach : assignment.promisedReach;
+    const dueBasis = slot ? slot.dueAt : assignment.dueAt;
+    if (reachBasis <= 0) {
+      throw new BadRequestException('This post has no promised reach recorded, so it cannot be settled pro-rata.');
     }
 
     // The client only ever hears about verified, admin-approved work — so the owner
     // is resolved here and notified from inside the approval, never from a promoter action.
     const ownerId = await this.campaignOwnerId(campaign.clientOrgId);
     const config = await this.rateConfig.getSettlementConfig();
-    const settlement = settleDelivery(assignment.grossMinor, verifiedViews, assignment.promisedReach, config);
+    const settlement = settleDelivery(grossBasis, verifiedViews, reachBasis, config);
 
     // The §2 delivery floor: below the threshold, approval is refused so the
     // promoter can resubmit rather than be part-paid for an under-delivery.
     if (!settlement.meetsThreshold) {
       throw new BadRequestException(
-        `Verified ${verifiedViews} views is below the ${config.deliveryThresholdPct}% threshold of the promised ${assignment.promisedReach}. Reject this submission so the promoter can resubmit.`,
+        `Verified ${verifiedViews} views is below the ${config.deliveryThresholdPct}% threshold of the promised ${reachBasis}. Reject this submission so the promoter can resubmit.`,
       );
     }
 
@@ -486,18 +496,31 @@ export class AdminService {
 
     if (!replayed) {
       const now = new Date();
-      // On-time = the approved submission landed by the delivery deadline. No deadline
-      // set → treat as on-time (nothing to be late against). Drives the trust delta (§4)
-      // and the reliability cache (§5).
-      const deliveredOnTime = assignment.dueAt === null || submission.submittedAt <= assignment.dueAt;
+      // On-time = the approved post landed by ITS deadline. No deadline → on-time
+      // (nothing to be late against). Drives the trust delta (§4) + reliability (§5).
+      const deliveredOnTime = dueBasis === null || submission.submittedAt <= dueBasis;
+      // Roll the assignment status up from all its posts, with this one now APPROVED.
+      const nextSlotViews = assignment.deliverySlots.length
+        ? assignment.deliverySlots.map((s) => ({ index: s.index, status: s.id === slot?.id ? DeliverySlotStatus.APPROVED : s.status }))
+        : [{ index: 1, status: DeliverySlotStatus.APPROVED }];
+      const rollup = computeAssignmentRollup(nextSlotViews);
       await this.prisma.$transaction(async (tx) => {
         await tx.submission.update({
           where: { id: submissionId },
           data: { verdict: Verdict.APPROVED, verifiedReach: verifiedViews, reviewedBy: adminId, reviewedAt: now },
         });
+        if (slot) {
+          await tx.deliverySlot.update({ where: { id: slot.id }, data: { status: DeliverySlotStatus.APPROVED } });
+        }
+        // paidAt/deliveredOnTime are stamped once, when the assignment first reaches
+        // a paid state (all posts resolved with at least one approved).
+        const becomesPaid = rollup.status === AssignmentStatus.PAID && assignment.paidAt === null;
         await tx.assignment.update({
           where: { id: assignment.id },
-          data: { status: AssignmentStatus.PAID, paidAt: now, deliveredOnTime },
+          data: {
+            status: rollup.status,
+            ...(becomesPaid ? { paidAt: now, deliveredOnTime } : {}),
+          },
         });
         await this.scoring.recordDeliveryOutcome(
           assignment.promoterId,
@@ -536,14 +559,21 @@ export class AdminService {
           );
         }
 
-        // Fulfilment is decided here, at the admin approval that pays the last slot:
-        // when every promised slot has a PAID delivery, the campaign is FULFILLED and
-        // the client is told. (This transition had no owner before — see handoff gap.)
+        // Fulfilment is decided here, at the approval that resolves the last post:
+        // when no campaign slot is still open AND no scheduled post is still pending
+        // or in review, every promised post has landed and passed review → FULFILLED.
+        // (§multi-day: this is now per-post, not per-assignment.)
         if (campaign.status === CampaignStatus.LIVE) {
-          const paidCount = await tx.assignment.count({
-            where: { campaignId: campaign.id, status: AssignmentStatus.PAID },
+          const openSlots = await tx.campaignSlot.count({
+            where: { campaignId: campaign.id, status: { in: [SlotStatus.OPEN, SlotStatus.OFFERED] } },
           });
-          if (paidCount >= campaign.slotsTotal) {
+          const outstandingPosts = await tx.deliverySlot.count({
+            where: {
+              assignment: { campaignId: campaign.id },
+              status: { in: [DeliverySlotStatus.PENDING, DeliverySlotStatus.SUBMITTED] },
+            },
+          });
+          if (openSlots === 0 && outstandingPosts === 0) {
             await tx.campaign.update({ where: { id: campaign.id }, data: { status: CampaignStatus.FULFILLED } });
             if (ownerId) {
               await this.notifications.create(
@@ -569,9 +599,10 @@ export class AdminService {
             before: { verdict: Verdict.PENDING, assignmentStatus: assignment.status },
             after: {
               verdict: Verdict.APPROVED,
-              assignmentStatus: AssignmentStatus.PAID,
+              assignmentStatus: rollup.status,
+              deliverySlotId: slot?.id ?? null,
               verifiedReach: verifiedViews,
-              promisedReach: assignment.promisedReach,
+              promisedReach: reachBasis,
               feeMinor: settlement.promoterFeeMinor,
               takeMinor: settlement.raliaTakeMinor,
             },
@@ -587,12 +618,23 @@ export class AdminService {
   async rejectSubmission(adminId: string, submissionId: string, reason: string): Promise<AdminDecisionDto> {
     const submission = await this.prisma.submission.findUnique({
       where: { id: submissionId },
-      include: { assignment: true },
+      include: { assignment: { include: { deliverySlots: true } }, deliverySlot: true },
     });
     if (!submission) throw new NotFoundException('No such submission.');
     if (submission.verdict !== Verdict.PENDING) {
       throw new ConflictException(`This submission is already ${submission.verdict.toLowerCase()}.`);
     }
+
+    const slot = submission.deliverySlot;
+    // §multi-day: reopen just THIS post for resubmission; the assignment status is
+    // the roll-up of all its posts. Legacy submissions with no slot fall back to the
+    // pre-slot behaviour — the whole assignment goes REJECTED (resubmittable).
+    const hasSlots = submission.assignment.deliverySlots.length > 0;
+    const nextAssignmentStatus = hasSlots
+      ? computeAssignmentRollup(
+          submission.assignment.deliverySlots.map((s) => ({ index: s.index, status: s.id === slot?.id ? DeliverySlotStatus.REJECTED : s.status })),
+        ).status
+      : AssignmentStatus.REJECTED;
 
     const now = new Date();
     await this.prisma.$transaction(async (tx) => {
@@ -600,11 +642,14 @@ export class AdminService {
         where: { id: submissionId },
         data: { verdict: Verdict.REJECTED, reviewedBy: adminId, reviewedAt: now, rejectReason: reason },
       });
-      // Back to REJECTED so the promoter can submit again — a rejection is
-      // feedback, not the end of the assignment.
+      if (slot) {
+        await tx.deliverySlot.update({ where: { id: slot.id }, data: { status: DeliverySlotStatus.REJECTED } });
+      }
+      // Back to a submittable state so the promoter can submit again — a rejection
+      // is feedback, not the end of the post.
       await tx.assignment.update({
         where: { id: submission.assignmentId },
-        data: { status: AssignmentStatus.REJECTED },
+        data: { status: nextAssignmentStatus },
       });
       // A rejected submission dings trust (−6, §4). The assignment stays open, so
       // this does not touch the completed/reliability counts.
@@ -1021,6 +1066,8 @@ export class AdminService {
       quoted_at: c.quotedAt?.toISOString() ?? null,
       starts_at: c.startsAt?.toISOString() ?? null,
       ends_at: c.endsAt?.toISOString() ?? null,
+      cadence: c.cadence,
+      posts_required: c.postsRequired,
       client: { org_id: c.clientOrg.id, name: c.clientOrg.name, industry: c.clientOrg.industry },
       targeting: c.targeting
         ? {
@@ -1045,6 +1092,7 @@ export class AdminService {
       where: { verdict: Verdict.PENDING },
       include: {
         artifacts: { select: { id: true, reuseOfId: true, file: { select: { id: true } } } },
+        deliverySlot: { select: { index: true, feeMinor: true, promisedReach: true } },
         assignment: {
           select: {
             id: true,
@@ -1054,6 +1102,7 @@ export class AdminService {
             promisedReach: true,
             campaign: { select: { name: true, objective: true } },
             promoter: { select: { promoterProfile: { select: { fullName: true } } } },
+            _count: { select: { deliverySlots: true } },
           },
         },
       },
@@ -1062,6 +1111,8 @@ export class AdminService {
     return Promise.all(
       rows.map(async (s) => {
         const primary = s.artifacts[0];
+        // §multi-day: review + settle against THIS post's per-slot economics.
+        const postsTotal = s.assignment._count.deliverySlots;
         return {
           id: s.id,
           assignment_id: s.assignmentId,
@@ -1070,8 +1121,12 @@ export class AdminService {
           objective: s.assignment.campaign.objective,
           promoter_id: s.assignment.promoterId,
           promoter_name: s.assignment.promoter.promoterProfile?.fullName ?? null,
-          fee: toMoney(s.assignment.feeMinor),
-          promised_reach: s.assignment.promisedReach,
+          // Per-post figures when the submission answers a scheduled post; fall back
+          // to the assignment totals for legacy (pre-slot) rows.
+          fee: toMoney(s.deliverySlot ? s.deliverySlot.feeMinor : s.assignment.feeMinor),
+          promised_reach: s.deliverySlot ? s.deliverySlot.promisedReach : s.assignment.promisedReach,
+          day_index: s.deliverySlot?.index ?? null,
+          posts_total: postsTotal,
           claimed_views: s.claimedViews,
           // Real human clicks driven — a delivery signal the admin weighs against the
           // self-reported view count when verifying.
@@ -1086,6 +1141,67 @@ export class AdminService {
           image_url: primary?.file ? `/v1/files/${primary.file.id}` : null,
           submitted_at: s.submittedAt.toISOString(),
           // reuse_of_id tells the admin this screenshot perceptually matched an earlier one.
+          artifacts: s.artifacts.map((a) => ({ id: a.id, reuse_of_id: a.reuseOfId })),
+        };
+      }),
+    );
+  }
+
+  /**
+   * Every submission for one campaign — the full proof history, not just what's
+   * awaiting review. Powers the campaign workspace's Submissions tab, so an approved
+   * or rejected post stays visible (with its verdict) after it leaves the queue.
+   */
+  async campaignSubmissions(campaignId: string) {
+    const rows = await this.prisma.submission.findMany({
+      where: { assignment: { campaignId } },
+      include: {
+        artifacts: { select: { id: true, reuseOfId: true, file: { select: { id: true } } } },
+        deliverySlot: { select: { index: true, feeMinor: true, promisedReach: true } },
+        assignment: {
+          select: {
+            id: true,
+            campaignId: true,
+            promoterId: true,
+            feeMinor: true,
+            promisedReach: true,
+            campaign: { select: { name: true, objective: true } },
+            promoter: { select: { promoterProfile: { select: { fullName: true } } } },
+            _count: { select: { deliverySlots: true } },
+          },
+        },
+      },
+      orderBy: { submittedAt: 'desc' },
+    });
+    return Promise.all(
+      rows.map(async (s) => {
+        const primary = s.artifacts[0];
+        return {
+          id: s.id,
+          assignment_id: s.assignmentId,
+          campaign_id: s.assignment.campaignId,
+          campaign_name: s.assignment.campaign.name,
+          objective: s.assignment.campaign.objective,
+          promoter_id: s.assignment.promoterId,
+          promoter_name: s.assignment.promoter.promoterProfile?.fullName ?? null,
+          fee: toMoney(s.deliverySlot ? s.deliverySlot.feeMinor : s.assignment.feeMinor),
+          promised_reach: s.deliverySlot ? s.deliverySlot.promisedReach : s.assignment.promisedReach,
+          day_index: s.deliverySlot?.index ?? null,
+          posts_total: s.assignment._count.deliverySlots,
+          claimed_views: s.claimedViews,
+          // The admin-verified figure, present once a submission has been decided.
+          verified_reach: s.verifiedReach,
+          verdict: s.verdict,
+          reject_reason: s.rejectReason,
+          reviewed_at: s.reviewedAt?.toISOString() ?? null,
+          clicks: await this.prisma.clickEvent.count({
+            where: { isBot: false, trackingLink: { assignmentId: s.assignmentId } },
+          }),
+          auto_flag: s.autoFlag,
+          public_url: s.publicUrl,
+          note: s.note,
+          image_url: primary?.file ? `/v1/files/${primary.file.id}` : null,
+          submitted_at: s.submittedAt.toISOString(),
           artifacts: s.artifacts.map((a) => ({ id: a.id, reuse_of_id: a.reuseOfId })),
         };
       }),
@@ -1377,6 +1493,8 @@ export class AdminService {
       proof_validity_days: c.proofValidityDays,
       min_trust_score: c.minTrustScore,
       offer_expiry_hours: c.offerExpiryHours,
+      delivery_window_hours: c.deliveryWindowHours,
+      contingency_buffer_hours: c.contingencyBufferHours,
       withdrawal_minimum_minor: Number(c.withdrawalMinimumMinor),
     };
   }
@@ -1399,6 +1517,8 @@ export class AdminService {
     if (dto.proof_validity_days !== undefined) data.proofValidityDays = dto.proof_validity_days;
     if (dto.min_trust_score !== undefined) data.minTrustScore = dto.min_trust_score;
     if (dto.offer_expiry_hours !== undefined) data.offerExpiryHours = dto.offer_expiry_hours;
+    if (dto.delivery_window_hours !== undefined) data.deliveryWindowHours = dto.delivery_window_hours;
+    if (dto.contingency_buffer_hours !== undefined) data.contingencyBufferHours = dto.contingency_buffer_hours;
     if (dto.withdrawal_minimum_minor !== undefined) data.withdrawalMinimumMinor = BigInt(dto.withdrawal_minimum_minor);
 
     await this.prisma.$transaction(async (tx) => {

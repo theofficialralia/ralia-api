@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AssignmentStatus, CampaignStatus, OfferStatus, SlotStatus } from '@prisma/client';
+import { AssignmentStatus, CampaignStatus, DeliverySlotStatus, OfferStatus, SlotStatus } from '@prisma/client';
+import { computeAssignmentRollup, hasConsecutiveMisses } from '../../common/delivery/delivery';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
 import { DEFAULT_SCORING_CONFIG, overOfferCount } from '../../common/scoring/scoring';
@@ -7,8 +8,10 @@ import { MatchingService } from '../matching/matching.service';
 import { NotificationService } from '../notifications/notification.service';
 import { ScoringService } from '../scoring/scoring.service';
 
-/** Assignment states a promoter can still act on — the ones a missed deadline reclaims. */
-const RECLAIMABLE: AssignmentStatus[] = [AssignmentStatus.IN_PROGRESS, AssignmentStatus.REJECTED];
+/** Delivery-slot states a promoter can still act on — the ones a missed deadline forfeits. */
+const RECLAIMABLE_SLOT: DeliverySlotStatus[] = [DeliverySlotStatus.PENDING, DeliverySlotStatus.REJECTED];
+/** Two missed posts back-to-back triggers re-allocation of the remainder (§multi-day). */
+const CONSECUTIVE_MISS_THRESHOLD = 2;
 
 export type AllocationPhase = 'inactive' | 'full' | 'head-start' | 'open';
 
@@ -131,54 +134,149 @@ export class AllocationService {
   }
 
   /**
-   * Reclaim assignments that missed their delivery deadline without acceptable proof.
-   * SUBMITTED assignments are deliberately spared — the promoter delivered and is
-   * waiting on review; only IN_PROGRESS / REJECTED (they had the chance and didn't
-   * deliver in time) are reclaimed. Each reclaim is its own transaction, and the
-   * CANCELLED transition is guarded by a status-conditional updateMany so two
-   * overlapping sweeps can't both release the same slot or double-ding the promoter.
+   * §multi-day reclaim, working per scheduled post rather than per assignment.
+   *
+   * A post whose internal deadline lapsed without acceptable proof is marked MISSED
+   * and forfeits its own pro-rata pay — the rest of the assignment continues. But
+   * two MISSED posts back-to-back mean the promoter is failing and the reach
+   * projection is at risk, so the assignment's REMAINING posts are pulled and the
+   * campaign slot is re-opened (carrying only the outstanding post count) for a
+   * replacement to cover over the remaining window.
+   *
+   * SUBMITTED posts are spared (the promoter delivered, awaiting review). Each write
+   * is guarded by a status-conditional updateMany so overlapping sweeps can't
+   * double-forfeit a post or double-ding a promoter.
    */
   async reclaimOverdueAssignments(now: Date): Promise<number> {
-    const overdue = await this.prisma.assignment.findMany({
-      where: { status: { in: RECLAIMABLE }, dueAt: { lt: now } },
-      select: { id: true, promoterId: true, slotId: true, campaignId: true },
+    const overdue = await this.prisma.deliverySlot.findMany({
+      where: {
+        status: { in: RECLAIMABLE_SLOT },
+        dueAt: { lt: now },
+        assignment: { status: { notIn: [AssignmentStatus.CANCELLED, AssignmentStatus.PAID] } },
+      },
+      select: { id: true, index: true, assignmentId: true, assignment: { select: { promoterId: true, campaignId: true } } },
     });
 
-    let reclaimed = 0;
-    for (const a of overdue) {
+    let missed = 0;
+    // Newly-missed posts per assignment THIS sweep — drives the trust ding, applied
+    // once the assignment's terminal state is settled so reliability reflects it.
+    const missedByAssignment = new Map<string, number>();
+    for (const s of overdue) {
       const won = await this.prisma.$transaction(async (tx) => {
         // Atomic claim: only the sweep that flips it out of a reclaimable state wins.
-        const res = await tx.assignment.updateMany({
-          where: { id: a.id, status: { in: RECLAIMABLE } },
-          data: { status: AssignmentStatus.CANCELLED },
+        const res = await tx.deliverySlot.updateMany({
+          where: { id: s.id, status: { in: RECLAIMABLE_SLOT } },
+          data: { status: DeliverySlotStatus.MISSED },
         });
-        if (res.count === 0) return false;
+        return res.count > 0;
+      });
+      if (won) {
+        missed++;
+        missedByAssignment.set(s.assignmentId, (missedByAssignment.get(s.assignmentId) ?? 0) + 1);
+      }
+    }
 
-        // Return the slot to the pool so another promoter's live offer can fill it.
-        if (a.slotId) {
-          await tx.campaignSlot.update({ where: { id: a.slotId }, data: { status: SlotStatus.OPEN } });
+    // Re-roll each touched assignment's status, ding the no-shows, and re-allocate if
+    // it now has two missed posts in a row (or a missed one-off) with reach owed.
+    let reallocated = 0;
+    for (const [assignmentId, missedThisSweep] of missedByAssignment) {
+      if (await this.reconcileAfterMisses(assignmentId, missedThisSweep, now)) reallocated++;
+    }
+
+    if (missed > 0) this.logger.log(`Marked ${missed} missed post(s); re-allocated ${reallocated} assignment(s).`);
+    return missed;
+  }
+
+  /**
+   * After posts were marked MISSED, roll the assignment status up, ding the no-shows,
+   * and decide whether to re-allocate. Returns true if the assignment was pulled and
+   * re-offered. The trust ding runs AFTER the status update so the reliability cache
+   * (lifetime PAID/CANCELLED) reflects the assignment's settled state.
+   */
+  private async reconcileAfterMisses(assignmentId: string, missedThisSweep: number, now: Date): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const assignment = await tx.assignment.findUnique({
+        where: { id: assignmentId },
+        include: { deliverySlots: true, campaign: { select: { name: true } } },
+      });
+      if (!assignment || assignment.status === AssignmentStatus.CANCELLED) return false;
+
+      const slotViews = assignment.deliverySlots.map((d) => ({ index: d.index, status: d.status }));
+      const totalPosts = slotViews.length;
+      const approved = slotViews.filter((v) => v.status === 'APPROVED').length;
+      // Reach still owed to the client if this promoter is pulled = total − approved.
+      // A replacement covers that deficit over the remaining window.
+      const deficit = totalPosts - approved;
+      // Pull + re-allocate when the promoter has failed: a one-off they missed, or
+      // two scheduled posts missed back-to-back (§multi-day). A single non-consecutive
+      // miss on a recurring campaign is just forfeited.
+      const shouldReallocate =
+        deficit > 0 && (totalPosts === 1 || hasConsecutiveMisses(slotViews, CONSECUTIVE_MISS_THRESHOLD));
+
+      if (!shouldReallocate) {
+        // Single miss (or non-consecutive): just forfeit and keep the rest going.
+        const rollup = computeAssignmentRollup(slotViews);
+        await tx.assignment.update({ where: { id: assignmentId }, data: { status: rollup.status } });
+        // Ding after the status settles so the reliability cache is accurate.
+        for (let i = 0; i < missedThisSweep; i++) {
+          await this.scoring.recordDeliveryOutcome(assignment.promoterId, 'NO_SHOW', now, tx);
         }
-        await tx.campaign.update({ where: { id: a.campaignId }, data: { slotsFilled: { decrement: 1 } } });
-
-        // No-show: the steepest trust penalty (−10, §4), plus a reliability recompute.
-        await this.scoring.recordDeliveryOutcome(a.promoterId, 'NO_SHOW', now, tx);
         await this.notifications.create(
           {
-            userId: a.promoterId,
+            userId: assignment.promoterId,
             type: 'assignment.reclaimed',
-            title: 'Assignment expired',
-            body: 'An assignment you accepted expired before you submitted proof, so it was returned to the pool. Missed deadlines lower your reliability — submit on time to keep it up.',
-            data: { assignmentId: a.id, campaignId: a.campaignId },
-            dedupeKey: `assignment.reclaimed:${a.id}`,
+            title: 'You missed a scheduled post',
+            body: `A scheduled post on "${assignment.campaign.name}" passed its deadline and won't be paid. Keep the rest of your posts on time to protect your reliability.`,
+            data: { assignmentId, campaignId: assignment.campaignId },
+            dedupeKey: `post.missed:${assignmentId}:${slotViews.filter((v) => v.status === 'MISSED').length}`,
           },
           tx,
         );
-        return true;
-      });
-      if (won) reclaimed++;
-    }
+        return false;
+      }
 
-    if (reclaimed > 0) this.logger.log(`Reclaimed ${reclaimed} overdue assignment(s).`);
-    return reclaimed;
+      // Re-allocate: forfeit any still-open posts, pull the promoter off, and re-open
+      // the campaign slot carrying the DEFICIT (total − approved) so a replacement
+      // covers the reach still owed, over the remaining window.
+      await tx.deliverySlot.updateMany({
+        where: { assignmentId, status: { in: RECLAIMABLE_SLOT } },
+        data: { status: DeliverySlotStatus.MISSED },
+      });
+      // Release the slot before clearing the FK: slotId is @unique, so the cancelled
+      // assignment must let go of it before a replacement can reserve it.
+      const slotId = assignment.slotId;
+      await tx.assignment.update({
+        where: { id: assignmentId },
+        data: { status: AssignmentStatus.CANCELLED, slotId: null },
+      });
+      if (slotId) {
+        await tx.campaignSlot.update({
+          where: { id: slotId },
+          data: { status: SlotStatus.OPEN, postsRequired: deficit },
+        });
+        await tx.campaign.update({ where: { id: assignment.campaignId }, data: { slotsFilled: { decrement: 1 } } });
+      }
+      // Ding after CANCELLED settles — the reliability cache now counts this as a
+      // failed assignment. One ding per post actually missed this sweep (not the
+      // future posts we force-forfeited on their behalf).
+      for (let i = 0; i < missedThisSweep; i++) {
+        await this.scoring.recordDeliveryOutcome(assignment.promoterId, 'NO_SHOW', now, tx);
+      }
+      const oneOff = totalPosts === 1;
+      await this.notifications.create(
+        {
+          userId: assignment.promoterId,
+          type: 'assignment.reclaimed',
+          title: oneOff ? 'Assignment expired' : 'Assignment reassigned',
+          body: oneOff
+            ? `An assignment you accepted on "${assignment.campaign.name}" expired before you submitted proof, so it was returned to the pool. Missed deadlines lower your reliability — submit on time to keep it up.`
+            : `You missed two scheduled posts in a row on "${assignment.campaign.name}", so its remaining posts were reassigned to keep the campaign on track. Missed deadlines lower your reliability.`,
+          data: { assignmentId, campaignId: assignment.campaignId },
+          dedupeKey: `assignment.reclaimed:${assignmentId}`,
+        },
+        tx,
+      );
+      return true;
+    });
   }
 }

@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Campaign, CampaignStatus, Prisma, PromoterRole } from '@prisma/client';
+import { Cadence, Campaign, CampaignStatus, Prisma, PromoterRole } from '@prisma/client';
 import { buildEligibility } from '../../common/eligibility/eligibility';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
@@ -77,6 +77,10 @@ export class CampaignsService {
         // budget is only known once priced; 0 until a quote is accepted.
         budgetMinor: 0n,
         slotsTotal: dto.slots_total,
+        startsAt: dto.starts_at ? new Date(dto.starts_at) : null,
+        endsAt: dto.ends_at ? new Date(dto.ends_at) : null,
+        cadence: dto.cadence ?? undefined,
+        postsRequired: normalizePostsRequired(dto.cadence, dto.posts_required),
         targeting: { create: { states: [], lgas: [], genders: [], languages: [], categories: [], platforms: [], roles: [] } },
       },
     });
@@ -125,6 +129,27 @@ export class CampaignsService {
     if (dto.role_config !== undefined) data.roleConfig = dto.role_config as unknown as Prisma.InputJsonValue;
     if (dto.needs_creative !== undefined) data.needsCreative = dto.needs_creative;
     if (dto.design_brief !== undefined) data.designBrief = dto.design_brief;
+    if (dto.starts_at !== undefined) data.startsAt = dto.starts_at ? new Date(dto.starts_at) : null;
+    if (dto.ends_at !== undefined) data.endsAt = dto.ends_at ? new Date(dto.ends_at) : null;
+    if (dto.cadence !== undefined) data.cadence = dto.cadence;
+    if (dto.cadence !== undefined || dto.posts_required !== undefined) {
+      const nextCadence = dto.cadence ?? campaign.cadence;
+      data.postsRequired = normalizePostsRequired(nextCadence, dto.posts_required ?? campaign.postsRequired);
+    }
+
+    // Run window sanity: end must be after start (compare against whichever side
+    // the client is changing, falling back to the stored value).
+    const nextStart = dto.starts_at !== undefined ? (dto.starts_at ? new Date(dto.starts_at) : null) : campaign.startsAt;
+    const nextEnd = dto.ends_at !== undefined ? (dto.ends_at ? new Date(dto.ends_at) : null) : campaign.endsAt;
+    if (nextStart && nextEnd && nextEnd.getTime() <= nextStart.getTime()) {
+      throw new BadRequestException('The campaign end date must be after its start date.');
+    }
+
+    // A recurring campaign needs a run window to spread its posts across.
+    const nextPosts = (data.postsRequired as number | undefined) ?? campaign.postsRequired;
+    if (nextPosts > 1 && !nextEnd) {
+      throw new BadRequestException('Set a campaign end date before requiring more than one post.');
+    }
 
     // Any content change invalidates a prior quote — the price must be recomputed
     // before approval, so drop back to DRAFT and clear the stale price.
@@ -200,7 +225,10 @@ export class CampaignsService {
     const defaults = await this.rateConfig.getCategoryDefaults(category);
     const reachPerSlot = filters.minEffectiveReach > 0 ? filters.minEffectiveReach : defaults.reachPerSlot;
     const unitPrice = slotPriceMinor(reachPerSlot, campaign.objective, filters, config);
-    const totalPrice = unitPrice * BigInt(campaign.slotsTotal);
+    // §multi-day: unitPrice is the price of ONE post. A recurring campaign is N
+    // posts per slot, so the campaign total scales by postsRequired.
+    const posts = campaign.postsRequired;
+    const totalPrice = unitPrice * BigInt(campaign.slotsTotal) * BigInt(posts);
 
     // Category floor (governing logic #2): a campaign cannot be booked below its
     // category's minimum fee. Enforced here, at the commit point, not in plan().
@@ -208,7 +236,7 @@ export class CampaignsService {
     if (totalPrice < floorMinor) {
       throw new BadRequestException(
         `A ${categoryLabel(category)} campaign must be at least ${formatNaira(floorMinor)}. ` +
-          `At ${campaign.slotsTotal} slot(s) × ${reachPerSlot} reach this prices to ` +
+          `At ${campaign.slotsTotal} slot(s)${posts > 1 ? ` × ${posts} posts` : ''} × ${reachPerSlot} reach this prices to ` +
           `${formatNaira(totalPrice)} — raise the slot count or the reach per slot.`,
       );
     }
@@ -228,6 +256,7 @@ export class CampaignsService {
           campaignId,
           role,
           unitPriceMinor: unitPrice,
+          postsRequired: posts,
         })),
       }),
       this.prisma.campaign.update({
@@ -246,7 +275,8 @@ export class CampaignsService {
       unit_price: toMoney(unitPrice),
       promoter_fee: toMoney(promoterFeeMinor),
       slots_total: campaign.slotsTotal,
-      estimated_reach: reach,
+      posts_required: posts,
+      estimated_reach: reach * posts,
       eligible_promoters: count,
       active_filters: activeFilterCount(filters),
     };
@@ -274,13 +304,17 @@ export class CampaignsService {
     const defaults = await this.rateConfig.getCategoryDefaults(category);
     // Reach per slot falls back to the category default when the client hasn't set one.
     const reachPerSlot = filters.minEffectiveReach > 0 ? filters.minEffectiveReach : defaults.reachPerSlot;
-    const unitPrice = slotPriceMinor(reachPerSlot, campaign.objective, filters, config);
+    const perPost = slotPriceMinor(reachPerSlot, campaign.objective, filters, config);
+    // §multi-day: a slot is `postsRequired` posts, so the per-slot cost the slider
+    // works against is perPost × posts. This keeps the preview identical to quote().
+    const posts = campaign.postsRequired;
+    const slotCost = perPost * BigInt(posts);
 
-    // Budget wins if both are given: floor(budget / unit) slots. A budget below one
+    // Budget wins if both are given: floor(budget / slotCost) slots. A budget below one
     // slot yields zero — the UI shows "raise your budget". Otherwise price the slots.
     let slots: number;
     if (driver.budgetMinor !== undefined) {
-      slots = unitPrice > 0n ? Number(BigInt(driver.budgetMinor) / unitPrice) : 0;
+      slots = slotCost > 0n ? Number(BigInt(driver.budgetMinor) / slotCost) : 0;
     } else if (driver.slots !== undefined) {
       slots = driver.slots;
     } else {
@@ -288,22 +322,24 @@ export class CampaignsService {
     }
     slots = Math.min(Math.max(slots, 0), 10000);
 
-    const totalPrice = unitPrice * BigInt(slots);
-    const { promoterFeeMinor } = splitFee(unitPrice, config);
+    const totalPrice = slotCost * BigInt(slots);
+    const { promoterFeeMinor } = splitFee(slotCost, config);
 
     // Floor for the slider (governing logic #2): the UI clamps the slider's minimum
     // to the category floor and pre-fills the category defaults. The preview itself
     // stays honest to the driver; quote() is the hard gate.
     const floorMinor = await this.rateConfig.getCategoryFloorMinor(category);
-    const minSlots = unitPrice > 0n ? Number((floorMinor + unitPrice - 1n) / unitPrice) : 0; // ceil
+    const minSlots = slotCost > 0n ? Number((floorMinor + slotCost - 1n) / slotCost) : 0; // ceil
 
     return {
-      unit_price: toMoney(unitPrice),
+      // unit_price is the per-SLOT cost (all its posts) — the slider steps by this.
+      unit_price: toMoney(slotCost),
       slots,
+      posts_required: posts,
       total_price: toMoney(totalPrice),
       promoter_fee: toMoney(promoterFeeMinor),
       reach_per_slot: reachPerSlot,
-      estimated_total_reach: slots * reachPerSlot,
+      estimated_total_reach: slots * reachPerSlot * posts,
       category,
       floor_minor: toMoney(floorMinor),
       min_slots: minSlots,
@@ -373,6 +409,10 @@ export class CampaignsService {
       price: campaign.priceMinor === null ? null : toMoney(campaign.priceMinor),
       budget: toMoney(campaign.budgetMinor),
       quoted_at: campaign.quotedAt ? campaign.quotedAt.toISOString() : null,
+      starts_at: campaign.startsAt ? campaign.startsAt.toISOString() : null,
+      ends_at: campaign.endsAt ? campaign.endsAt.toISOString() : null,
+      cadence: campaign.cadence,
+      posts_required: campaign.postsRequired,
       role_config: (campaign.roleConfig as unknown as RoleConfigDto | null) ?? null,
       needs_creative: campaign.needsCreative,
       design_brief: campaign.designBrief,
@@ -382,6 +422,16 @@ export class CampaignsService {
 
 function categoryLabel(category: CampaignCategory): string {
   return category === 'CREATION' ? 'Creation/Participation' : 'Distribution';
+}
+
+/**
+ * Reconcile the client's cadence + posts_required into a single stored count.
+ * ONE_OFF (or an unspecified cadence) is always a single post; a recurring
+ * cadence needs at least 2. Defaults to 1 when nothing is supplied.
+ */
+function normalizePostsRequired(cadence: Cadence | undefined, posts: number | undefined): number {
+  if (!cadence || cadence === Cadence.ONE_OFF) return 1;
+  return Math.max(2, posts ?? 2);
 }
 
 /** Kobo → a human ₦ string for error messages, e.g. 1500000n → "₦15,000". */

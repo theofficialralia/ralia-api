@@ -118,6 +118,13 @@ export class AdminController {
     return this.admin.campaignDetail(id);
   }
 
+  @Get('campaigns/:id/submissions')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'All proof for one campaign', description: 'Full submission history (pending, approved, rejected) — powers the campaign Submissions tab.' })
+  campaignSubmissions(@Param('id', ParseUUIDPipe) id: string) {
+    return this.admin.campaignSubmissions(id);
+  }
+
   @Post('campaigns/:id/approve')
   @HttpCode(HttpStatus.OK)
   @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)

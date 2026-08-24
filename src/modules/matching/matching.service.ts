@@ -18,7 +18,7 @@ import {
 } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { buildEligibility } from '../../common/eligibility/eligibility';
-import { categoryForRole, slotPriceMinor, slotTargetReach, splitFee, PricingConfig, TargetingFilters } from '../../common/pricing/pricing';
+import { categoryForRole, slotTargetReach, splitFee, PricingConfig, TargetingFilters } from '../../common/pricing/pricing';
 import {
   DEFAULT_SCORING_CONFIG,
   PromoterRole as CapabilityRole,
@@ -227,7 +227,8 @@ export class MatchingService {
     if (!slot) throw new BadRequestException('This campaign has no slots.');
 
     // Per-category pricing: the slot's role picks Distribution vs Creation RPM.
-    const config = await this.rateConfig.getPricingConfig(categoryForRole(slot.role));
+    const category = categoryForRole(slot.role);
+    const config = await this.rateConfig.getPricingConfig(category);
     const rate = await this.rateConfig.getActive();
     const filters = toFilters(campaign.targeting);
     const { channelWhere } = buildEligibility(filters, rate.minTrustScore);
@@ -236,6 +237,19 @@ export class MatchingService {
     const expiresAt = new Date(Date.now() + rate.offerExpiryHours * 60 * 60 * 1000);
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const role = slot.role;
+
+    // §pricing: a slot is worth what the CLIENT funded for it — the frozen per-post
+    // unit price on the slot — not what the promoter's whole channel is worth.
+    // Pricing on the promoter's own reach let a big-audience account be promised many
+    // times the campaign's per-slot budget (unbacked by escrow — the ₦48M-on-a-₦263k
+    // -campaign bug). promisedReach is the reach the slot was PRICED for; a promoter
+    // with a larger channel simply clears that target comfortably, they aren't paid
+    // for reach the client never bought. These are per-post and identical for every
+    // promoter, so they're computed once here rather than per-offer.
+    const defaults = await this.rateConfig.getCategoryDefaults(category);
+    const reachPerSlot = filters.minEffectiveReach > 0 ? filters.minEffectiveReach : defaults.reachPerSlot;
+    const grossMinor = slot.unitPriceMinor;
+    const { promoterFeeMinor } = splitFee(grossMinor, config);
 
     const created: OfferDto[] = [];
     for (const promoterId of [...new Set(promoterIds)]) {
@@ -247,14 +261,6 @@ export class MatchingService {
       if (!channel) {
         throw new BadRequestException(`Promoter ${promoterId} has no channel matching this campaign.`);
       }
-
-      // Per-promoter pricing: the fee is priced from THIS promoter's effective
-      // reach, and the gross + promised reach are frozen on the offer so
-      // settlement can pro-rate against them (ALGORITHMS.md §2). Escrow can't be
-      // overspent — the ledger's non-negative guard catches over-commitment at
-      // payout — so no budget pre-check is enforced here (admin controls the pool).
-      const grossMinor = slotPriceMinor(channel.effectiveReach, campaign.objective, filters, config);
-      const { promoterFeeMinor } = splitFee(grossMinor, config);
 
       // Freeze the match score on the offer so the promoter sees the same "Fit %"
       // the ranking used, even as their signals drift afterwards (§7).
@@ -288,7 +294,7 @@ export class MatchingService {
             role,
             feeMinor: promoterFeeMinor,
             grossMinor,
-            promisedReach: channel.effectiveReach,
+            promisedReach: reachPerSlot,
             score: fit ? fit.matchScore : null,
             expiresAt,
             status: OfferStatus.SENT,
@@ -369,22 +375,36 @@ export class MatchingService {
       }
 
       // Stamp the delivery deadline at accept (§8): miss it and the sweeper reclaims
-      // the slot and dings the promoter. The window is a config knob (read above).
-      const dueAt = new Date(Date.now() + deliveryWindowMs);
-
-      // Reserve one open slot, skipping any a concurrent accept holds.
-      const slots = await tx.$queryRaw<{ id: string }[]>`
-        SELECT id FROM campaign_slots
+      // the slot and dings the promoter.
+      //
+      // Two horizons (§multi-day): the client's run window ends at campaign.endsAt —
+      // that is their expectation. The promoter's internal deadline sits a
+      // Reserve one open slot, skipping any a concurrent accept holds. posts_required
+      // is per-slot: a slot re-opened after a promoter failed carries only the
+      // REMAINING post count, so the replacement covers what's left of the window.
+      const slots = await tx.$queryRaw<{ id: string; posts_required: number }[]>`
+        SELECT id, posts_required FROM campaign_slots
         WHERE campaign_id = ${offer.campaign_id}::uuid AND status = 'OPEN'
         ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1`;
       const slot = slots[0];
       if (!slot) throw new ConflictException('This campaign is full.');
+
+      const posts = Math.max(1, slot.posts_required);
+
+      // §multi-day: spread `posts` scheduled posts across the run window, each with
+      // its own internal deadline (all inside the contingency buffer). One-off = a
+      // single slot due at the buffered window end / flat delivery window.
+      const schedule = generateSlotSchedule(campaign.startsAt, campaign.endsAt, posts, rate.contingencyBufferHours, deliveryWindowMs);
+      const dueAt = schedule[schedule.length - 1]!.dueAt; // the assignment's final deadline
 
       await tx.campaignSlot.update({ where: { id: slot.id }, data: { status: SlotStatus.FILLED } });
       await tx.offer.update({ where: { id: offerId }, data: { status: OfferStatus.ACCEPTED } });
 
       const trackingToken = randomBytes(18).toString('base64url');
 
+      // Assignment economics are the per-post offer figures × posts — the total the
+      // promoter earns across the whole campaign; each DeliverySlot settles its own
+      // per-post share on approval.
       const assignment = await tx.assignment.create({
         data: {
           offerId,
@@ -393,12 +413,22 @@ export class MatchingService {
           channelId: offer.channel_id,
           slotId: slot.id,
           role: offer.role as never,
-          feeMinor: offer.fee_minor,
-          grossMinor: offer.gross_minor,
-          promisedReach: offer.promised_reach,
+          feeMinor: offer.fee_minor * BigInt(posts),
+          grossMinor: offer.gross_minor * BigInt(posts),
+          promisedReach: offer.promised_reach * posts,
           trackingToken,
           status: AssignmentStatus.IN_PROGRESS,
           dueAt,
+          deliverySlots: {
+            create: schedule.map((s) => ({
+              index: s.index,
+              scheduledFor: s.scheduledFor,
+              dueAt: s.dueAt,
+              grossMinor: offer.gross_minor,
+              feeMinor: offer.fee_minor,
+              promisedReach: offer.promised_reach,
+            })),
+          },
         },
       });
 
@@ -471,6 +501,7 @@ export class MatchingService {
       include: {
         campaign: { select: { name: true, objective: true, promoterInstructions: true, destinationUrl: true, roleConfig: true } },
         submissions: { orderBy: { submittedAt: 'desc' }, take: 1, select: { verdict: true, rejectReason: true } },
+        deliverySlots: { select: { status: true } },
         trackingLink: { select: { token: true } },
       },
     });
@@ -500,6 +531,9 @@ export class MatchingService {
       clicks: a.trackingLink ? clicksByToken.get(a.trackingLink.token) ?? 0 : 0,
       latest_verdict: a.submissions[0]?.verdict ?? null,
       reject_reason: a.submissions[0]?.rejectReason ?? null,
+      // §multi-day progress: how many scheduled posts, and how many approved so far.
+      posts_required: a.deliverySlots.length,
+      posts_approved: a.deliverySlots.filter((d) => d.status === 'APPROVED').length,
     }));
   }
 
@@ -519,6 +553,8 @@ export class MatchingService {
             objective: true,
             promoterInstructions: true,
             destinationUrl: true,
+            startsAt: true,
+            endsAt: true,
             roleConfig: true,
             assets: {
               orderBy: { orderIndex: 'asc' },
@@ -532,6 +568,16 @@ export class MatchingService {
           orderBy: { submittedAt: 'desc' },
           take: 1,
           select: { claimedViews: true, verifiedReach: true, verdict: true, rejectReason: true, artifacts: { take: 1, select: { file: { select: { id: true } } } } },
+        },
+        deliverySlots: {
+          orderBy: { index: 'asc' },
+          include: {
+            submissions: {
+              orderBy: { submittedAt: 'desc' },
+              take: 1,
+              select: { claimedViews: true, verifiedReach: true, verdict: true, rejectReason: true, artifacts: { take: 1, select: { file: { select: { id: true } } } } },
+            },
+          },
         },
       },
     });
@@ -553,6 +599,34 @@ export class MatchingService {
     const sub = a.submissions[0];
     const trackingBase = process.env.TRACKING_BASE_URL ?? process.env.APP_BASE_URL ?? 'http://localhost:6100';
 
+    // §multi-day: the per-post timeline. One-off assignments have exactly one slot;
+    // recurring ones expose "Day 1…N" each with its own deadline, status and proof.
+    const slots = a.deliverySlots.map((d) => {
+      const dsub = d.submissions[0];
+      const dueMs = d.dueAt.getTime();
+      return {
+        id: d.id,
+        index: d.index,
+        scheduled_for: d.scheduledFor.toISOString(),
+        due_at: d.dueAt.toISOString(),
+        status: d.status,
+        // What the promoter can act on right now.
+        submittable: d.status === 'PENDING' || d.status === 'REJECTED',
+        overdue: (d.status === 'PENDING' || d.status === 'REJECTED') && dueMs < Date.now(),
+        fee: toMoney(d.feeMinor),
+        submission: dsub
+          ? {
+              image_url: dsub.artifacts[0]?.file ? `/v1/files/${dsub.artifacts[0].file.id}` : null,
+              claimed_views: dsub.claimedViews,
+              verified_reach: dsub.verifiedReach,
+              verdict: dsub.verdict,
+              reject_reason: dsub.rejectReason,
+            }
+          : null,
+      };
+    });
+    const approvedCount = slots.filter((s) => s.status === 'APPROVED').length;
+
     return {
       id: a.id,
       campaign_id: a.campaignId,
@@ -563,7 +637,16 @@ export class MatchingService {
       fee: toMoney(a.feeMinor),
       fee_min: toMoney(BigInt(feeMin)),
       promised_reach: a.promisedReach,
+      // due_at is the promoter's INTERNAL deadline (a contingency buffer before the
+      // client's run-window end). campaign_ends_at is the client-facing window end,
+      // shown only for context — the promoter is held to due_at.
       due_at: a.dueAt?.toISOString() ?? null,
+      campaign_starts_at: a.campaign.startsAt?.toISOString() ?? null,
+      campaign_ends_at: a.campaign.endsAt?.toISOString() ?? null,
+      // §multi-day: the per-post schedule + progress. posts_required === 1 → one-off.
+      posts_required: slots.length,
+      posts_approved: approvedCount,
+      slots,
       clicks,
       instructions: a.campaign.promoterInstructions,
       task: describeRoleTask(a.role, asRoleConfig(a.campaign.roleConfig)),
@@ -659,6 +742,71 @@ function toOfferDto(
     status: o.status,
     fit_pct: o.score != null ? Math.round(o.score.toNumber() * 100) : null,
   };
+}
+
+/**
+ * The promoter's internal delivery deadline at accept time.
+ *
+ * - No campaign end date → the flat delivery window (now + deliveryWindowMs), the
+ *   original behaviour.
+ * - With a campaign end date → the internal deadline sits `bufferHours` BEFORE the
+ *   client's end, so a reclaim + re-allocation still lands before the client's
+ *   expectation. Never later than the client end, and always at least a minimum
+ *   window ahead so a promoter accepting late still has time to act.
+ */
+export function resolveDueAt(endsAt: Date | null, deliveryWindowMs: number, bufferHours: number, now: number = Date.now()): Date {
+  if (!endsAt) return new Date(now + deliveryWindowMs);
+  const bufferMs = bufferHours * 60 * 60 * 1000;
+  const internal = endsAt.getTime() - bufferMs;
+  // Give a late-accepting promoter at least this much runway, but never spill past
+  // the client's own end date.
+  const MIN_WINDOW_MS = Math.min(deliveryWindowMs, 6 * 60 * 60 * 1000);
+  const floor = now + MIN_WINDOW_MS;
+  const due = Math.max(internal, floor);
+  return new Date(Math.min(due, endsAt.getTime()));
+}
+
+export type SlotSchedule = { index: number; scheduledFor: Date; dueAt: Date };
+
+/**
+ * The per-post schedule for an assignment (§multi-day).
+ *
+ * - `posts <= 1` → a single slot due at the buffered window end (or the flat
+ *   delivery window when there's no end date) — identical to the one-off flow.
+ * - `posts > 1` → `posts` deadlines spread evenly across the USABLE window
+ *   [now/start … end − buffer], so even the final post lands before the client's
+ *   expectation. Requires an end date; without one, posts fall back to spacing by
+ *   the flat delivery window (degenerate, but safe).
+ *
+ * `index` is 1-based ("Day 1 of N"). `scheduledFor` and `dueAt` are equal here —
+ * the contingency buffer is applied once, at the tail of the window.
+ */
+export function generateSlotSchedule(
+  startsAt: Date | null,
+  endsAt: Date | null,
+  posts: number,
+  bufferHours: number,
+  deliveryWindowMs: number,
+  now: number = Date.now(),
+): SlotSchedule[] {
+  const n = Math.max(1, posts);
+  if (n === 1) {
+    const dueAt = resolveDueAt(endsAt, deliveryWindowMs, bufferHours, now);
+    return [{ index: 1, scheduledFor: endsAt ?? dueAt, dueAt }];
+  }
+
+  const bufferMs = bufferHours * 60 * 60 * 1000;
+  const effStart = Math.max(startsAt ? startsAt.getTime() : now, now);
+  // Reserve the buffer at the tail: the last post is due at end − buffer.
+  const usableEnd = endsAt ? endsAt.getTime() - bufferMs : effStart + deliveryWindowMs * n;
+  // Degenerate window (end already inside the buffer): fall back to evenly spacing
+  // by the flat delivery window so we never produce past-dated deadlines.
+  const span = usableEnd > effStart ? usableEnd - effStart : deliveryWindowMs * n;
+  const step = span / n;
+  return Array.from({ length: n }, (_, i) => {
+    const at = new Date(effStart + step * (i + 1));
+    return { index: i + 1, scheduledFor: at, dueAt: at };
+  });
 }
 
 function toAssignmentDto(a: {

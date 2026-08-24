@@ -1,10 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { AssetKind, CampaignObjective, CampaignStatus, PromoterRole } from '@prisma/client';
+import { AssetKind, Cadence, CampaignObjective, CampaignStatus, PromoterRole } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsDateString,
   IsEnum,
   IsInt,
   IsOptional,
@@ -86,6 +87,28 @@ export class CreateCampaignDto {
   @Min(1)
   @Max(500)
   slots_total!: number;
+
+  @ApiPropertyOptional({ example: '2026-09-01', description: 'When the campaign should go live (client-facing window start). ISO date.' })
+  @IsOptional()
+  @IsDateString()
+  starts_at?: string;
+
+  @ApiPropertyOptional({ example: '2026-09-14', description: 'When the campaign run ends (client-facing expectation). ISO date. Promoter deadlines are set a contingency buffer BEFORE this.' })
+  @IsOptional()
+  @IsDateString()
+  ends_at?: string;
+
+  @ApiPropertyOptional({ enum: Cadence, description: 'How posts are spaced over the run window. ONE_OFF = a single post.' })
+  @IsOptional()
+  @IsEnum(Cadence)
+  cadence?: Cadence;
+
+  @ApiPropertyOptional({ example: 7, minimum: 1, maximum: 90, description: 'Posts each promoter delivers over the window (1 = one-off).' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(90)
+  posts_required?: number;
 }
 
 export class UpdateCampaignDto {
@@ -143,6 +166,28 @@ export class UpdateCampaignDto {
   @MaxLength(1000)
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   design_brief?: string;
+
+  @ApiPropertyOptional({ example: '2026-09-01', description: 'When the campaign should go live (client-facing window start). ISO date.' })
+  @IsOptional()
+  @IsDateString()
+  starts_at?: string;
+
+  @ApiPropertyOptional({ example: '2026-09-14', description: 'When the campaign run ends (client-facing expectation). ISO date. Promoter deadlines are set a contingency buffer BEFORE this.' })
+  @IsOptional()
+  @IsDateString()
+  ends_at?: string;
+
+  @ApiPropertyOptional({ enum: Cadence, description: 'How posts are spaced over the run window. ONE_OFF = a single post.' })
+  @IsOptional()
+  @IsEnum(Cadence)
+  cadence?: Cadence;
+
+  @ApiPropertyOptional({ example: 7, minimum: 1, maximum: 90, description: 'Posts each promoter delivers over the window (1 = one-off).' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(90)
+  posts_required?: number;
 }
 
 // ── Targeting ────────────────────────────────────────────────
@@ -278,6 +323,18 @@ export class CampaignDto {
   @ApiProperty({ nullable: true, format: 'date-time' })
   quoted_at!: string | null;
 
+  @ApiPropertyOptional({ nullable: true, format: 'date', description: 'Client-facing run window start.' })
+  starts_at?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, format: 'date', description: 'Client-facing run window end (the client expectation). Promoter deadlines sit a contingency buffer before this.' })
+  ends_at?: string | null;
+
+  @ApiPropertyOptional({ enum: Cadence, description: 'How posts are spaced over the run window.' })
+  cadence?: Cadence;
+
+  @ApiPropertyOptional({ description: 'Posts each promoter delivers over the window (1 = one-off).' })
+  posts_required?: number;
+
   @ApiPropertyOptional({ type: RoleConfigDto, nullable: true, description: 'Per-role task detail from Targeting.' })
   role_config?: RoleConfigDto | null;
 
@@ -331,6 +388,9 @@ export class CampaignPlanDto {
   @ApiProperty({ example: 12, description: 'Slots this plan buys.' })
   slots!: number;
 
+  @ApiProperty({ example: 1, description: 'Posts each promoter delivers per slot (folded into unit_price).' })
+  posts_required!: number;
+
   @ApiProperty({ type: MoneyDto, description: 'Total price = unit_price × slots.' })
   total_price!: MoneyDto;
 
@@ -375,7 +435,10 @@ export class QuoteDto {
   @ApiProperty({ example: 12 })
   slots_total!: number;
 
-  @ApiProperty({ example: 2400, description: 'Sum of effective reach across eligible promoters (estimate).' })
+  @ApiProperty({ example: 1, description: 'Posts each promoter delivers over the run window.' })
+  posts_required!: number;
+
+  @ApiProperty({ example: 2400, description: 'Sum of effective reach across eligible promoters × posts (estimate).' })
   estimated_reach!: number;
 
   @ApiProperty({ example: 34, description: 'How many promoters currently match the targeting.' })

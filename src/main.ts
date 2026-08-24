@@ -35,7 +35,10 @@ async function bootstrap(): Promise<void> {
   const docsPath = setupSwagger(app);
 
   const port = Number(process.env.PORT ?? 6100);
-  await app.listen(port, '127.0.0.1');
+  // Bind all interfaces so a container/PaaS proxy (Railway) can reach the app.
+  // Override with HOST=127.0.0.1 to restrict to localhost in a local dev setup.
+  const host = process.env.HOST ?? '0.0.0.0';
+  await app.listen(port, host);
 
   if (docsPath) {
     app.get(Logger).log(`API docs → http://localhost:${port}${docsPath}`);
