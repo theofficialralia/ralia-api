@@ -1,115 +1,178 @@
-# Ralia API
+<div align="center">
 
-Backend for the Ralia MVP — a two-sided marketplace where businesses create advertising campaigns and promoters post them to their own social channels for a fee.
+# ⚙️ Ralia API
 
-Build plan and phase order: [docs/BACKEND_PLAN.md](docs/BACKEND_PLAN.md). Scope is fixed by the Claude Code Handoff (DSD-RALIA-CC-R02) — see §11 of that document before adding anything.
+### The engine behind the Ralia promoter marketplace — matching, money, and proof.
 
-## Local setup
+<br/>
 
-Requires Docker, Node 20+.
+![NestJS](https://img.shields.io/badge/NestJS-10-E0234E?style=for-the-badge&logo=nestjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![Prisma](https://img.shields.io/badge/Prisma-5-2D3748?style=for-the-badge&logo=prisma&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
+![Node](https://img.shields.io/badge/Node-%E2%89%A520-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)
 
-```bash
-make up
+![Tests](https://img.shields.io/badge/tests-335%20passing-2ea043?style=flat-square)
+![Coverage](https://img.shields.io/badge/suites-21-2ea043?style=flat-square)
+![License](https://img.shields.io/badge/license-proprietary-555?style=flat-square)
+
+</div>
+
+---
+
+Ralia connects **businesses** who want reach with **promoters** who have an audience. A client
+books a campaign; the platform matches eligible promoters, sends offers, tracks the posts they
+make, verifies the proof, and settles pay — pro-rata on what was actually delivered. This service
+owns all of that: identity, matching, the escrow ledger, and the delivery lifecycle.
+
+## 🧭 System at a glance
+
+```mermaid
+flowchart LR
+    Client([🧑‍💼 Client app]):::app
+    Promoter([📣 Promoter app]):::app
+    Admin([🛡️ Admin app]):::app
+
+    subgraph API["⚙️ Ralia API · NestJS"]
+      direction TB
+      Identity[Identity & Auth]
+      Campaigns[Campaigns & Pricing]
+      Matching[Matching & Allocation]
+      Delivery[Delivery & Evidence]
+      Ledger[Escrow Ledger]
+    end
+
+    PG[(🐘 PostgreSQL)]:::infra
+    Cloud[☁️ Cloudinary]:::infra
+    Mail[✉️ Email OTP / Resend]:::infra
+
+    Client & Promoter & Admin -->|/v1 REST| API
+    API --> PG
+    Delivery --> Cloud
+    Identity --> Mail
+
+    classDef app fill:#E11D48,stroke:#881337,color:#fff;
+    classDef infra fill:#1e293b,stroke:#0f172a,color:#fff;
 ```
 
-That copies `.env.example` → `.env`, generates dev secrets, starts postgres/redis/minio/mailpit, installs, migrates, seeds, and runs the API in watch mode.
+## 🔄 The delivery loop (this is the product)
 
-| Service | URL |
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant A as Admin
+    participant Eng as API
+    participant P as Promoter
+
+    C->>Eng: Create + fund campaign (escrow)
+    Eng->>P: Auto-allocate offers to eligible promoters
+    P->>Eng: Accept offer → assignment + delivery slots
+    Note over Eng,P: A slot per scheduled post (Day 1…N)
+    P->>Eng: Post + submit proof for a day
+    Eng->>A: Proof lands in review queue
+    A->>Eng: Approve (verify views)
+    Eng->>P: Pay pro-rata from escrow (per slot)
+    Eng->>C: "Verified delivery" — only approved work is ever shown
+```
+
+> **Integrity rule:** a client only ever hears about **approved** work. Nothing a promoter does
+> reaches the client until an admin has verified it.
+
+## 📈 Campaign lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> DRAFT
+    DRAFT --> QUOTED: price it
+    QUOTED --> PENDING_APPROVAL: submit
+    PENDING_APPROVAL --> CONFIRMING_PAYMENT: admin approves
+    PENDING_APPROVAL --> REJECTED
+    CONFIRMING_PAYMENT --> LIVE: escrow funded
+    LIVE --> FULFILLED: every post delivered & verified
+    FULFILLED --> SETTLED
+    LIVE --> CANCELLED
+    SETTLED --> [*]
+```
+
+## 🧱 Module map
+
+| Domain | Modules |
 |---|---|
-| API | http://localhost:3000 |
-| Health | http://localhost:3000/health |
-| Mailpit | http://localhost:8025 |
-| MinIO console | http://localhost:9001 |
-| Postgres | `localhost:5433` — **not** 5432, to leave a native postgres install alone |
+| **Identity** | `identity` (auth, email OTP, sessions) · `profiles` |
+| **Campaigns** | `campaigns` (wizard, pricing, quote) · `clients` |
+| **Matching** | `matching` (offers, fit score, accept) · `allocation` (auto-allocate, reclaim, re-allocation) · `scoring` |
+| **Delivery** | `evidence` (proof + perceptual-hash dedupe) · `files` (provider-agnostic storage) · `tracking` (click links) |
+| **Money** | `ledger` (double-entry escrow) · `wallet` · `payments` |
+| **Ops** | `admin` (review, RBAC, reconciliation) · `analytics` · `notifications` |
 
-Seeded accounts, password `Password123!`:
+<details>
+<summary><b>💰 How money is kept honest</b></summary>
 
-- `admin@ralia.test`
-- `client1@ralia.test`, `client2@ralia.test`
-- `promoter1@ralia.test` … `promoter40@ralia.test`
+- A campaign is a fixed escrow: `slot_price × slots × posts`.
+- A **slot** is priced from what the client funded, not the promoter's channel size — so payouts
+  are always bounded by escrow.
+- Settlement is **per delivered post**, pro-rata on verified reach vs the priced target; there is
+  **no client refund** — Ralia retains any undelivered remainder.
+- Every money- or score-affecting write lands a double-entry ledger row + an audit record in the
+  same transaction.
+</details>
 
-## Commands
+<details>
+<summary><b>🗓️ Multi-day campaigns</b></summary>
 
-```bash
-make up        # clean checkout → running seeded API, one command
-make down      # stop containers, keep data
-make reset     # destroy data, re-migrate, re-seed
-make migrate   # create and apply a migration
-make seed      # re-run the seed
-make test      # test suite
-make psql      # psql shell into the dev database
-make openapi   # write docs/openapi.json from the code
-make verify-loop  # drive the whole loop through the live API
-make gate      # openapi + a dated end-to-end run, as gate evidence
-```
+A campaign can require **N posts over a run window** (one-off, daily, weekly, or custom). On accept,
+the assignment fans out into **delivery slots** (Day 1…N), each with its own internal deadline
+(a contingency buffer *before* the client's expectation). A single missed day forfeits that day's
+pay; **two missed days in a row** re-allocate the remaining posts to a fresh promoter.
+</details>
 
-## Verifying the whole thing works
-
-`make verify-loop` drives the complete product loop through the public API
-against a running server, and asserts the money at each step:
-
-```
-register client + promoter → profile + channel → admin approves promoter
-→ create, price and fund a campaign → candidates → offer → accept
-→ click the tracking link → submit proof → admin approves
-→ ledger pays the promoter → withdraw → admin records the payout
-```
-
-It ends by checking that the payout was **one balanced transaction**, that the
-books close (cash held = everything owed plus earned), and that every decision
-left an audit row. It exits non-zero on the first failed assertion, so it is
-usable as a smoke test, not just a demo.
-
-`make gate` runs that and writes a dated transcript to `docs/gate-evidence/`,
-alongside the generated `docs/openapi.json`. Together these are the Phase-2 gate
-artifacts: the frozen contract, and dated proof the loop runs end to end.
-
-Two things to know when running it:
-
-- It registers two accounts per run and registration is rate-limited to 5/min, so
-  wait a minute between runs. The script says so plainly if it is throttled.
-- It needs `DEV_OTP_LOG` set (see `.env.example`) so it can complete a real
-  signup through the API. The console OTP provider that writes it refuses to boot
-  in production, so this seam cannot exist there.
-
-## Migrations
-
-Expand-then-contract: never write a migration that breaks the currently running version. Every migration ships a tested `down.sql`.
-
-Prisma has no native down migrations, so the down SQL is generated from a diff taken **before** the migration is applied:
+## 🚀 Quickstart
 
 ```bash
-./scripts/make-down.sh              # 1. stage reverse SQL (DB still has the old shape)
-npx prisma migrate dev --name foo   # 2. create + apply the migration
-./scripts/make-down.sh <dir>        # 3. file down.sql into that migration
-./scripts/migrate-down.sh           # roll back the latest migration (dev/staging only)
+npm install
+cp .env.example .env            # then fill in the secrets
+npm run prisma:migrate          # apply migrations to your local Postgres
+npm run seed                    # optional: demo users + campaigns
+npm run start:dev               # http://localhost:6100
 ```
 
-CI fails the build if `schema.prisma` has drifted from the migration history.
+<details>
+<summary><b>🔐 Environment</b></summary>
 
-## Rules that are not negotiable
+Copy `.env.example` and set at minimum: `DATABASE_URL`, the `JWT_*` secrets,
+`FIELD_ENCRYPTION_KEY` (`openssl rand -hex 32`, exactly 64 hex chars),
+`STORAGE_PROVIDER` + `CLOUDINARY_URL`, `MAIL_TRANSPORT`, and `OTP_TRANSPORT=email`.
+Full deploy checklist lives in the workspace `DEPLOY.md`.
+</details>
 
-These are encoded in the schema and enforced in review. See the handoff for the reasoning.
+<details>
+<summary><b>🛠️ Scripts</b></summary>
 
-- **Money is `BigInt` minor units (kobo).** Never `Float`. Ever.
-- **There is no balance column.** Balances are always `SUM(ledger_entries)`.
-- **Every ledger transaction balances**: `sum(debits) = sum(credits)`.
-- **`ledger_*` and `audit_log` are append-only.** Never edited, never deleted.
-- **Every mutating money endpoint requires an `Idempotency-Key`** and rejects the request without one.
-- **`effective_reach` is computed server-side**, never accepted from a client.
-- **No secret in the repo.** Everything via env; `.env.example` is the contract.
-- Never log bank details, OTPs, or tokens.
+| Script | Does |
+|---|---|
+| `start:dev` | watch-mode dev server |
+| `start:prod` | `node dist/main` (production) |
+| `build` | `nest build` → `dist/` |
+| `test` | Jest suite (21 suites · 335 tests) |
+| `prisma:migrate` / `prisma:deploy` | dev / prod migrations |
+| `seed` | seed demo data |
+</details>
 
-## Layout
+## 🧪 Testing
 
+```bash
+npm test          # all suites
+npm run test:cov  # with coverage
 ```
-prisma/
-  schema.prisma      # the frozen data model (handoff §4)
-  migrations/        # each with migration.sql + down.sql
-  seed.ts            # 2 clients, 40 promoters, 3 campaigns, all 37 states
-src/
-  common/            # prisma, shared pure logic (reach formula)
-  health/
-scripts/             # secret generation, down-migration tooling
-docs/BACKEND_PLAN.md # phases, milestones, open decisions
-```
+
+## 🚢 Deployment
+
+Runs on **Railway** (Nixpacks) with managed Postgres — `railway.json` builds and runs
+`prisma migrate deploy && node dist/main.js` on every deploy. See `DEPLOY.md`.
+
+---
+
+<div align="center">
+<sub>Part of Ralia · <a href="../ralia-client">Client</a> · <a href="../ralia-admin">Admin</a> · <a href="../ralia-promoter">Promoter</a></sub>
+</div>
