@@ -12,6 +12,7 @@ const BRAND = {
   muted: '#8a8a8a',
   line: '#ececec',
   wash: '#f4f4f5',
+  logo: 'https://ralia.co/Ralia%20Logo.jpeg',
 } as const;
 
 const SUPPORT = {
@@ -67,8 +68,8 @@ export function renderBrandedEmail(opts: BrandedEmail): string {
         <td align="center">
           <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:560px;max-width:92%;background:#ffffff;border:1px solid ${BRAND.line};border-radius:14px;overflow:hidden">
             <tr>
-              <td style="background:${BRAND.dark};padding:22px 32px">
-                <span style="font-size:23px;font-weight:800;letter-spacing:-0.5px;color:#ffffff">Ralia<span style="color:${BRAND.red}">.</span></span>
+              <td style="background:#ffffff;padding:20px 32px;border-bottom:3px solid ${BRAND.red}">
+                <img src="${BRAND.logo}" alt="Ralia" height="40" style="display:block;height:40px;width:auto;border:0;outline:none;text-decoration:none" />
               </td>
             </tr>
             <tr>
