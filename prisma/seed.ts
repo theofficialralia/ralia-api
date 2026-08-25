@@ -154,6 +154,15 @@ async function main() {
     throw new Error('Refusing to seed: NODE_ENV=production. This script is destructive.');
   }
 
+  // What gets seeded is decided here:
+  //   SEED_MODE=full    (default) — demo data: admin + 2 clients + 40 promoters + campaigns.
+  //   SEED_MODE=minimal          — essentials + a small ready-to-test set: rate_config,
+  //                                ledger accounts, admin, 1 client, 3 ACTIVE promoters, no
+  //                                campaigns (testers create their own).
+  const MODE = (process.env.SEED_MODE ?? 'full').toLowerCase();
+  const minimal = MODE === 'minimal';
+  console.log(`→ seed mode: ${minimal ? 'minimal (essentials + small tester set)' : 'full (demo data)'}`);
+
   console.log('→ wiping');
   await wipe();
 
@@ -189,13 +198,14 @@ async function main() {
   });
 
   // ── Clients ────────────────────────────────────────────────
-  console.log('→ 2 clients');
-  const clientOrgs = [];
   const clientSpecs = [
     { email: 'client1@ralia.test', phone: '+2348010000001', org: 'Naija Threads', industry: 'Consumer Goods & Retail (FMCG)' },
     { email: 'client2@ralia.test', phone: '+2348010000002', org: 'PayFlow NG', industry: 'Financial Services & Fintech' },
   ];
-  for (const spec of clientSpecs) {
+  const clientsToSeed = minimal ? clientSpecs.slice(0, 1) : clientSpecs;
+  console.log(`→ ${clientsToSeed.length} client(s)`);
+  const clientOrgs = [];
+  for (const spec of clientsToSeed) {
     const user = await prisma.user.create({
       data: {
         email: spec.email,
@@ -227,9 +237,12 @@ async function main() {
   }
 
   // ── Promoters ──────────────────────────────────────────────
-  console.log('→ 40 promoters across every platform');
+  // Minimal: a few ACTIVE, matchable promoters so a tester can drive matching right
+  // away. Full: 40 across a mix of statuses so the admin queues aren't empty.
+  const PROMOTER_COUNT = minimal ? 3 : 40;
+  console.log(`→ ${PROMOTER_COUNT} promoter(s)`);
   const promoterIds: string[] = [];
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < PROMOTER_COUNT; i++) {
     const firstName = pick(FIRST_NAMES);
     const lastName = pick(LAST_NAMES);
     const age = intBetween(18, 54);
@@ -237,8 +250,9 @@ async function main() {
 
     // Most promoters are ACTIVE so matching has a pool; a few sit in each
     // other state so the admin queues are not empty on a fresh seed.
-    const status =
-      i < 32 ? PromoterStatus.ACTIVE
+    const status = minimal
+      ? PromoterStatus.ACTIVE
+      : i < 32 ? PromoterStatus.ACTIVE
       : i < 36 ? PromoterStatus.AWAITING_APPROVAL
       : i < 38 ? PromoterStatus.PROFILE_INCOMPLETE
       : PromoterStatus.REJECTED;
@@ -335,7 +349,8 @@ async function main() {
     promoterIds.push(user.id);
   }
 
-  // ── Campaigns: targeting spans every state across the three ─
+  // ── Campaigns (full mode only — testers create their own) ───
+  if (!minimal) {
   console.log('→ 3 campaigns spanning every state');
   const third = Math.ceil(STATES.length / 3);
   const stateGroups = [
@@ -465,6 +480,7 @@ async function main() {
       })),
     });
   }
+  } // end campaigns (full mode)
 
   // ── Summary ────────────────────────────────────────────────
   const counts = {
@@ -486,8 +502,12 @@ async function main() {
   console.table(counts);
   console.log(`  platforms with channels : ${platformCoverage.length}/${PLATFORMS.length}`);
   console.log(`  states covered by targeting : ${statesCovered.size}/${STATES.length}`);
-  console.log(`\n  Dev login password for every seeded account: ${DEV_PASSWORD}`);
-  console.log('  admin@ralia.test · client1@ralia.test · promoter1@ralia.test …promoter40\n');
+  console.log(`\n  Login password for every seeded account: ${DEV_PASSWORD}`);
+  console.log(
+    minimal
+      ? '  admin@ralia.test · client1@ralia.test · promoter1@ralia.test … promoter3\n'
+      : '  admin@ralia.test · client1@ralia.test · promoter1@ralia.test … promoter40\n',
+  );
 }
 
 main()
