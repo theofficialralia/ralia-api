@@ -13,6 +13,10 @@ export type Cta = { label: string; url: string };
 export function notificationCta(type: string, data: unknown): Cta | null {
   const d = (data ?? {}) as Record<string, unknown>;
   const campaignId = typeof d.campaignId === 'string' ? d.campaignId : null;
+  const assignmentId = typeof d.assignmentId === 'string' ? d.assignmentId : null;
+  // Promoter assignment detail lives at /campaigns/:assignmentId; fall back to the
+  // list when the id isn't on the payload (legacy notifications).
+  const promoterAssignment = assignmentId ? `${PROMOTER_URL}/campaigns/${assignmentId}` : `${PROMOTER_URL}/campaigns`;
 
   switch (type) {
     // ── Client-facing (client app) ──
@@ -30,11 +34,11 @@ export function notificationCta(type: string, data: unknown): Cta | null {
     case 'offer.created':
       return { label: 'View offer', url: `${PROMOTER_URL}/offers` };
     case 'submission.approved':
-      return { label: 'View campaign', url: `${PROMOTER_URL}/campaigns` };
+      return { label: 'View campaign', url: promoterAssignment };
     case 'submission.rejected':
-      return { label: 'Resubmit proof', url: `${PROMOTER_URL}/campaigns` };
+      return { label: 'Resubmit proof', url: promoterAssignment };
     case 'assignment.reclaimed':
-      return { label: 'View campaigns', url: `${PROMOTER_URL}/campaigns` };
+      return { label: 'View campaigns', url: promoterAssignment };
     case 'promoter.approved':
       return { label: 'See your offers', url: `${PROMOTER_URL}/offers` };
     case 'withdrawal.approved':
