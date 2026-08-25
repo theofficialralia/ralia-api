@@ -22,6 +22,12 @@ export class OffersController {
     return this.matching.listOffers(user.id);
   }
 
+  @Get(':id')
+  @ApiOperation({ summary: 'One offer — details a promoter reviews before accepting' })
+  detail(@CurrentUser() user: AuthedUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.matching.offerDetail(user.id, id);
+  }
+
   @Post(':id/accept')
   @HttpCode(HttpStatus.OK)
   // Accept is where a slot is reserved; rate-limit it against a burst from one user.

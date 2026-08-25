@@ -338,6 +338,66 @@ export class MatchingService {
   }
 
   /**
+   * One offer, with enough of the campaign for a promoter to decide before they
+   * accept or decline: the brief, what they'd do, the earn range, the schedule,
+   * the matched channel, and a preview of the creative. No tracking link — that
+   * only exists once the offer is accepted.
+   */
+  async offerDetail(promoterId: string, offerId: string) {
+    const o = await this.prisma.offer.findFirst({
+      where: { id: offerId, promoterId },
+      include: {
+        campaign: {
+          select: {
+            name: true, objective: true, description: true, promoterInstructions: true,
+            roleConfig: true, startsAt: true, endsAt: true, postsRequired: true, cadence: true,
+            assets: {
+              orderBy: { orderIndex: 'asc' },
+              select: { kind: true, captionText: true, file: { select: { id: true, mimeType: true, sizeBytes: true } } },
+            },
+          },
+        },
+        channel: { select: { platform: true, handle: true, effectiveReach: true } },
+      },
+    });
+    if (!o) throw new NotFoundException('No such offer.');
+
+    // Earn range across the whole run: the offer fee is per-post, so total = fee × posts;
+    // the floor is that total at the delivery threshold τ.
+    const settle = await this.rateConfig.getSettlementConfig();
+    const posts = o.campaign.postsRequired || 1;
+    const feeMaxMinor = Number(o.feeMinor) * posts;
+    const feeMinMinor = Math.round((feeMaxMinor * settle.deliveryThresholdPct) / 100);
+
+    const assets = o.campaign.assets;
+    const posterAsset = assets.find((x) => x.kind === 'POSTER' && x.file) ?? assets.find((x) => x.kind === 'IMAGE' && x.file);
+    const captionAsset = assets.find((x) => x.kind === 'CAPTION' && x.captionText);
+
+    return {
+      id: o.id,
+      campaign_id: o.campaignId,
+      campaign_name: o.campaign.name,
+      objective: o.campaign.objective,
+      role: o.role,
+      description: o.campaign.description,
+      instructions: o.campaign.promoterInstructions,
+      task: describeRoleTask(o.role as never, asRoleConfig(o.campaign.roleConfig)),
+      fee: toMoney(BigInt(feeMaxMinor)),
+      fee_min: toMoney(BigInt(feeMinMinor)),
+      promised_reach: o.promisedReach,
+      posts_required: posts,
+      cadence: o.campaign.cadence,
+      starts_at: o.campaign.startsAt?.toISOString() ?? null,
+      ends_at: o.campaign.endsAt?.toISOString() ?? null,
+      expires_at: o.expiresAt.toISOString(),
+      fit_pct: o.score != null ? Math.round(o.score.toNumber() * 100) : null,
+      channel: o.channel ? { platform: o.channel.platform, handle: o.channel.handle, effective_reach: o.channel.effectiveReach } : null,
+      poster: posterAsset?.file ? { url: `/v1/files/${posterAsset.file.id}`, mime_type: posterAsset.file.mimeType, size_bytes: posterAsset.file.sizeBytes } : null,
+      caption: captionAsset?.captionText ?? null,
+    };
+  }
+
+  /**
    * Accept an offer: reserve one open slot from the campaign's pool, atomically,
    * and create the assignment.
    *
