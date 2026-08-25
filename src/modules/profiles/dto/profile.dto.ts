@@ -225,7 +225,7 @@ export class ChannelDto {
 export class CreateBankAccountDto {
   @ApiProperty({ example: '058', description: 'Nigerian bank code.' })
   @IsString()
-  @Matches(/^\d{3,6}$/, { message: 'bank_code must be 3-6 digits' })
+  @Matches(/^\d{3,10}$/, { message: 'bank_code must be a valid bank code' })
   bank_code!: string;
 
   @ApiProperty({ example: '0123456789', description: 'NUBAN, 10 digits. Encrypted at rest; never returned.' })
@@ -238,6 +238,18 @@ export class CreateBankAccountDto {
   @MaxLength(120)
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   account_name!: string;
+}
+
+export class ResolveAccountDto {
+  @ApiProperty({ example: '058', description: 'Nigerian bank code.' })
+  @IsString()
+  @Matches(/^\d{3,10}$/, { message: 'bank_code must be a valid bank code' })
+  bank_code!: string;
+
+  @ApiProperty({ example: '0123456789', description: 'NUBAN, 10 digits.' })
+  @IsString()
+  @Matches(/^\d{10}$/, { message: 'account_number must be a 10-digit NUBAN' })
+  account_number!: string;
 }
 
 export class BankAccountDto {

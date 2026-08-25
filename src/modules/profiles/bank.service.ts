@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PromoterBankAccount } from '@prisma/client';
 import { FieldEncryptionService } from '../../common/crypto/field-encryption.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { PaystackService, PaystackBank, ResolvedAccount } from '../payments/paystack.service';
 import { BankAccountDto, CreateBankAccountDto } from './dto/profile.dto';
 
 /**
@@ -17,7 +18,18 @@ export class BankService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly crypto: FieldEncryptionService,
+    private readonly paystack: PaystackService,
   ) {}
+
+  /** Banks for the "where you get paid" dropdown (Paystack, with a dev fallback). */
+  listBanks(): Promise<PaystackBank[]> {
+    return this.paystack.listBanks();
+  }
+
+  /** Resolve an account number + bank code to the holder's name (Paystack + dev bypass). */
+  resolveAccount(accountNumber: string, bankCode: string): Promise<ResolvedAccount> {
+    return this.paystack.resolveAccount(accountNumber, bankCode);
+  }
 
   async list(userId: string): Promise<BankAccountDto[]> {
     const accounts = await this.prisma.promoterBankAccount.findMany({

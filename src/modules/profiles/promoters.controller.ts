@@ -9,6 +9,7 @@ import {
   ParseUUIDPipe,
   Post,
   Put,
+  Query,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -35,6 +36,7 @@ import {
   CreateBankAccountDto,
   CreateChannelDto,
   ProfileDto,
+  ResolveAccountDto,
   UpdateProfileDto,
 } from './dto/profile.dto';
 import { ProfileService } from './profile.service';
@@ -111,6 +113,18 @@ export class PromotersController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
     return this.channels.remove(user.id, id);
+  }
+
+  @Get('banks')
+  @ApiOperation({ summary: 'Bank list for the payout dropdown (Paystack)' })
+  listBanks() {
+    return this.bank.listBanks();
+  }
+
+  @Get('bank/resolve')
+  @ApiOperation({ summary: 'Resolve an account number + bank code to the account name' })
+  resolveBank(@Query() dto: ResolveAccountDto) {
+    return this.bank.resolveAccount(dto.account_number, dto.bank_code);
   }
 
   @Get('bank')
