@@ -31,6 +31,13 @@ export class AdminController {
     return this.admin.pendingPromoters();
   }
 
+  @Get('promoters')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'All promoters (directory, any status)' })
+  allPromoters() {
+    return this.admin.allPromoters();
+  }
+
   @Get('queues/campaigns')
   @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
   @ApiOperation({ summary: 'Campaigns awaiting approval or payment' })

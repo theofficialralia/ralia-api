@@ -990,6 +990,41 @@ export class AdminService {
     })));
   }
 
+  /**
+   * Every promoter, any status — the admin directory (distinct from the
+   * approval queue, which is AWAITING_APPROVAL only). A lightweight summary per
+   * promoter for a searchable table; the queue keeps the heavy per-channel detail.
+   */
+  async allPromoters() {
+    const rows = await this.prisma.promoterProfile.findMany({
+      include: {
+        user: {
+          select: {
+            email: true,
+            phoneE164: true,
+            createdAt: true,
+            channels: { orderBy: { effectiveReach: 'desc' }, select: { platform: true, effectiveReach: true } },
+          },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+    return rows.map((p) => ({
+      user_id: p.userId,
+      full_name: p.fullName,
+      email: p.user.email,
+      phone_e164: p.user.phoneE164,
+      status: p.status,
+      location_state: p.locationState,
+      trust_score: p.trustScore.toNumber(),
+      reliability: p.reliability.toNumber(),
+      channels_count: p.user.channels.length,
+      top_platform: p.user.channels[0]?.platform ?? null,
+      total_reach: p.user.channels.reduce((sum, c) => sum + c.effectiveReach, 0),
+      created_at: p.user.createdAt.toISOString(),
+    }));
+  }
+
   async pendingCampaigns() {
     const rows = await this.prisma.campaign.findMany({
       where: { status: { in: [CampaignStatus.PENDING_APPROVAL, CampaignStatus.CONFIRMING_PAYMENT] } },

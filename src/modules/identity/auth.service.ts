@@ -92,7 +92,9 @@ export class AuthService {
             ownerUserId: created.id,
             name: dto.org_name!.trim(),
             phoneWhatsapp: dto.phone_e164,
-            status: ClientOrgStatus.PENDING,
+            // Clients are self-serve — no approval gate. Active on creation so the
+            // status reflects reality (admins can still SUSPEND/reactivate).
+            status: ClientOrgStatus.ACTIVE,
           },
         });
       } else {
