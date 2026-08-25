@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { OtpPurpose } from '@prisma/client';
 import { Mailer } from '../../../common/mailer/mailer';
+import { renderBrandedEmail } from '../../../common/mailer/email-template';
 import { OtpProvider, OtpRecipient, otpPurposeLabel } from './otp-provider';
 
 /**
@@ -24,7 +25,12 @@ export class EmailOtpProvider implements OtpProvider {
       to: to.email,
       subject: `${code} is your Ralia code`,
       text: `Your Ralia verification code is ${code}. Enter it to ${action}. It expires shortly — don't share it with anyone.`,
-      html: `<p>Your Ralia verification code is</p><p style="font-size:28px;font-weight:800;letter-spacing:4px">${code}</p><p>Enter it to ${action}. It expires shortly — don't share it with anyone.</p>`,
+      html: renderBrandedEmail({
+        heading: 'Your verification code',
+        paragraphs: [`Enter this code to ${action}. It expires shortly — never share it with anyone.`],
+        code,
+        preheader: `Your Ralia code is ${code}`,
+      }),
     });
   }
 }

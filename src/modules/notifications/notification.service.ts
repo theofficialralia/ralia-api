@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { NotificationEmailStatus, Prisma, PrismaClient } from '@prisma/client';
 import { MAILER, Mailer } from '../../common/mailer/mailer';
+import { renderBrandedEmail } from '../../common/mailer/email-template';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 /** A Prisma client or an interactive-transaction client — mirrors LedgerService. */
@@ -77,7 +78,16 @@ export class NotificationService {
     let failed = 0;
     for (const n of pending) {
       try {
-        await this.mailer.send({ to: n.user.email, subject: n.title, text: n.body });
+        await this.mailer.send({
+          to: n.user.email,
+          subject: n.title,
+          text: n.body,
+          html: renderBrandedEmail({
+            heading: n.title,
+            paragraphs: [n.body],
+            preheader: n.body.slice(0, 140),
+          }),
+        });
         await this.prisma.notification.update({
           where: { id: n.id },
           data: { emailStatus: NotificationEmailStatus.SENT, emailedAt: now, emailAttempts: { increment: 1 } },
