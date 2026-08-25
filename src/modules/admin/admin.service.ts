@@ -955,6 +955,7 @@ export class AdminService {
                 id: true, platform: true, handle: true, url: true, claimedAudience: true,
                 effectiveReach: true, verificationTier: true, verifiedAt: true,
                 isGroup: true, groupMembers: true, activeParticipants: true, status: true,
+                evidenceFile: { select: { id: true } },
               },
             },
           },
@@ -986,6 +987,8 @@ export class AdminService {
         group_members: c.groupMembers,
         active_participants: c.activeParticipants,
         status: c.status,
+        // The screenshot the promoter uploaded for this channel (for screenshot verification).
+        screenshot_url: c.evidenceFile ? `/v1/files/${c.evidenceFile.id}` : null,
       })),
     })));
   }
