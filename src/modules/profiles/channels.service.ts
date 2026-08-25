@@ -11,6 +11,9 @@ import { ProfileService } from './profile.service';
 const EVIDENCE_MAX_BYTES = 5 * 1024 * 1024;
 const EVIDENCE_MIME: Record<string, true> = { 'image/png': true, 'image/jpeg': true, 'image/webp': true };
 
+/** Channels with no public link — exempt from the handle/link requirement. */
+const LINKLESS_PLATFORMS: Platform[] = [Platform.WHATSAPP_STATUS, Platform.OFFLINE];
+
 @Injectable()
 export class ChannelsService {
   constructor(
@@ -29,6 +32,12 @@ export class ChannelsService {
   }
 
   async create(promoterId: string, dto: CreateChannelDto): Promise<ChannelDto> {
+    // A channel needs a handle or link so the admin can verify it (insights) —
+    // except WhatsApp Status and offline channels, which have no public link and
+    // are verified by screenshot alone.
+    if (!LINKLESS_PLATFORMS.includes(dto.platform) && !dto.handle?.trim() && !dto.url) {
+      throw new BadRequestException('Add a handle or a link for this channel so it can be verified.');
+    }
     if (dto.is_group && dto.group_members === undefined) {
       throw new BadRequestException('group_members is required for a group channel.');
     }

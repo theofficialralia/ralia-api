@@ -238,13 +238,13 @@ describe('profiles — questionnaire, channels, bank', () => {
     await authed()
       .post('/promoters/me/channels')
       .set(bearer())
-      .send({ platform: Platform.INSTAGRAM, claimed_audience: 10_000, verification_tier: 'INSIGHTS' })
+      .send({ platform: Platform.INSTAGRAM, handle: 'h', claimed_audience: 10_000, verification_tier: 'INSIGHTS' })
       .expect(400);
 
     await authed()
       .post('/promoters/me/channels')
       .set(bearer())
-      .send({ platform: Platform.INSTAGRAM, claimed_audience: 10_000, effective_reach: 999_999 })
+      .send({ platform: Platform.INSTAGRAM, handle: 'h', claimed_audience: 10_000, effective_reach: 999_999 })
       .expect(400);
   });
 
@@ -255,7 +255,7 @@ describe('profiles — questionnaire, channels, bank', () => {
     const res = await authed()
       .post('/promoters/me/channels')
       .set(bearer())
-      .send({ platform: Platform.INSTAGRAM, claimed_audience: 10_000 })
+      .send({ platform: Platform.INSTAGRAM, handle: 'h', claimed_audience: 10_000 })
       .expect(201);
 
     // 10,000 × 0.05 × 0.6 = 300, versus 600 on the default factor.
@@ -328,7 +328,7 @@ describe('profiles — questionnaire, channels, bank', () => {
     const mine = await authed()
       .post('/promoters/me/channels')
       .set(bearer())
-      .send({ platform: Platform.TIKTOK, claimed_audience: 5000 })
+      .send({ platform: Platform.TIKTOK, handle: 'h', claimed_audience: 5000 })
       .expect(201);
 
     expect((await authed().get('/promoters/me/channels').set(bearer()).expect(200)).body).toHaveLength(1);
@@ -350,7 +350,7 @@ describe('profiles — questionnaire, channels, bank', () => {
     const res = await authed()
       .post('/promoters/me/channels')
       .set(bearer())
-      .send({ platform: Platform.TIKTOK, claimed_audience: 5000 })
+      .send({ platform: Platform.TIKTOK, handle: 'h', claimed_audience: 5000 })
       .expect(201);
     await prisma.channel.update({ where: { id: res.body.id }, data: { adminFrozen: true } });
 
@@ -361,7 +361,7 @@ describe('profiles — questionnaire, channels, bank', () => {
     await authed()
       .post('/promoters/me/channels')
       .set(bearer())
-      .send({ platform: Platform.WHATSAPP_GROUP, claimed_audience: 500, is_group: true })
+      .send({ platform: Platform.WHATSAPP_GROUP, handle: 'h', claimed_audience: 500, is_group: true })
       .expect(400);
 
     await authed()
