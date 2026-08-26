@@ -209,3 +209,46 @@ export function slotTargetReach(
 export function objectiveMultLabel(objective: CampaignObjective): string {
   return objective.toLowerCase();
 }
+
+/**
+ * Price-driven sizing (governing logic #2, the inverse of the quote formula).
+ *
+ * The client names an EXACT campaign price; we derive the total reach it buys and
+ * the whole number of promoter slots that spreads across, at the category's
+ * reach-per-slot. The price is authoritative and is NEVER snapped — only the
+ * promoter count rounds (you can't book 4.3 promoters). This is what keeps the
+ * quote equal to what the client typed, and it reproduces the category floors
+ * exactly: ₦15,000 Distribution → 5,000 reach ÷ 1,000 = 5 promoters; ₦100,000
+ * Creation → 200,000 reach ÷ 10,000 = 20 promoters.
+ *
+ *   total_reach = slotTargetReach(price)                      // reach-postings the price buys
+ *   slots       = max(1, round(total_reach ÷ reachPerSlotAllPosts))
+ *
+ * `reachPerSlotAllPosts` is reach_per_slot × posts_required — one promoter slot
+ * delivers reach_per_slot per post across all its posts.
+ */
+export function sizeFromPrice(
+  totalPriceMinor: bigint,
+  objective: CampaignObjective,
+  filters: TargetingFilters,
+  reachPerSlotAllPosts: number,
+  config: PricingConfig,
+): { totalReach: number; slots: number } {
+  const totalReach = slotTargetReach(totalPriceMinor, objective, filters, config);
+  const basis = Math.max(1, reachPerSlotAllPosts);
+  const slots = Math.max(1, Math.round(totalReach / basis));
+  return { totalReach, slots };
+}
+
+/**
+ * Splits an exact campaign price across N promoter slots × posts so the per-post
+ * unit prices sum back to the price with NO drift — the first `remainder` postings
+ * carry one extra kobo. Escrow holds exactly `totalPriceMinor`, and Σ(unit) equals
+ * it, so ledger conservation holds even when the price doesn't divide evenly.
+ */
+export function perPostUnitPrices(totalPriceMinor: bigint, slots: number, posts: number): bigint[] {
+  const units = BigInt(Math.max(1, slots)) * BigInt(Math.max(1, posts));
+  const base = totalPriceMinor / units;
+  const remainder = Number(totalPriceMinor - base * units);
+  return Array.from({ length: Number(units) }, (_, i) => (i < remainder ? base + 1n : base));
+}

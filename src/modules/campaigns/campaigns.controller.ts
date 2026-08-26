@@ -35,6 +35,7 @@ import {
   CreateCampaignDto,
   PlanRequestDto,
   QuoteDto,
+  QuoteRequestDto,
   SetTargetingDto,
   UpdateCampaignDto,
 } from './dto/campaign.dto';
@@ -99,8 +100,12 @@ export class CampaignsController {
       'Returns price, per-slot fee, estimated reach and eligible promoter count. Freezes the price and moves the campaign to QUOTED; a later rate_config change never reprices it.',
   })
   @ApiOkResponse({ type: QuoteDto })
-  quote(@CurrentUser() user: AuthedUser, @Param('id', ParseUUIDPipe) id: string): Promise<QuoteDto> {
-    return this.campaigns.quote(user.id, id);
+  quote(
+    @CurrentUser() user: AuthedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: QuoteRequestDto,
+  ): Promise<QuoteDto> {
+    return this.campaigns.quote(user.id, id, { priceMinor: dto.price_minor });
   }
 
   @Post(':id/plan')
@@ -115,7 +120,7 @@ export class CampaignsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: PlanRequestDto,
   ): Promise<CampaignPlanDto> {
-    return this.campaigns.plan(user.id, id, { budgetMinor: dto.budget_minor, slots: dto.slots });
+    return this.campaigns.plan(user.id, id, { priceMinor: dto.price_minor, budgetMinor: dto.budget_minor, slots: dto.slots });
   }
 
   @Post(':id/submit')

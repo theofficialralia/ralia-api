@@ -1,9 +1,11 @@
 import { CampaignObjective } from '@prisma/client';
 import {
   activeFilterCount,
+  perPostUnitPrices,
   PricingConfig,
   settleDelivery,
   SettlementConfig,
+  sizeFromPrice,
   slotPriceMinor,
   slotTargetReach,
   splitFee,
@@ -221,6 +223,51 @@ describe('pricing (§5.2)', () => {
         // Exact within rounding — the forward price rounds once, so the inverse is ±1.
         expect(Math.abs(slotTargetReach(price, CampaignObjective.LEAD_GEN, filters, CONFIG) - reach)).toBeLessThanOrEqual(1);
       }
+    });
+  });
+
+  describe('sizeFromPrice (price-driven, governing logic #2)', () => {
+    it('reproduces the Distribution floor: ₦15,000 → 5,000 reach → 5 promoters', () => {
+      const { totalReach, slots } = sizeFromPrice(15_000n, CampaignObjective.AWARENESS, NO_FILTERS, 1000, CONFIG);
+      expect(totalReach).toBe(5000);
+      expect(slots).toBe(5);
+    });
+
+    it('reproduces the Creation floor: ₦100,000 → 200,000 reach → 20 promoters (RPM 500)', () => {
+      const creation: PricingConfig = { ...CONFIG, rpmMinor: 500 };
+      const { totalReach, slots } = sizeFromPrice(100_000n, CampaignObjective.AWARENESS, NO_FILTERS, 10_000, creation);
+      expect(totalReach).toBe(200_000);
+      expect(slots).toBe(20);
+    });
+
+    it('never snaps the price: ₦120,000 → exactly 40 promoters, price unchanged', () => {
+      const { totalReach, slots } = sizeFromPrice(120_000n, CampaignObjective.AWARENESS, NO_FILTERS, 1000, CONFIG);
+      expect(totalReach).toBe(40_000);
+      expect(slots).toBe(40);
+    });
+
+    it('always yields at least one slot', () => {
+      const { slots } = sizeFromPrice(1n, CampaignObjective.AWARENESS, NO_FILTERS, 1000, CONFIG);
+      expect(slots).toBe(1);
+    });
+  });
+
+  describe('perPostUnitPrices (exact split, no drift)', () => {
+    it('divides evenly when it can', () => {
+      const units = perPostUnitPrices(15_000n, 5, 1);
+      expect(units).toEqual([3000n, 3000n, 3000n, 3000n, 3000n]);
+    });
+
+    it('carries the remainder on the first postings so the sum is exact', () => {
+      const units = perPostUnitPrices(100n, 3, 1);
+      expect(units).toEqual([34n, 33n, 33n]);
+      expect(units.reduce((a, b) => a + b, 0n)).toBe(100n);
+    });
+
+    it('spreads across posts too', () => {
+      const units = perPostUnitPrices(120_000n, 40, 2); // 80 postings
+      expect(units).toHaveLength(80);
+      expect(units.reduce((a, b) => a + b, 0n)).toBe(120_000n);
     });
   });
 });

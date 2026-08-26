@@ -12,6 +12,7 @@ import {
   activeFilterCount,
   CampaignCategory,
   categoryForRole,
+  sizeFromPrice,
   slotPriceMinor,
   splitFee,
   TargetingFilters,
@@ -210,7 +211,7 @@ export class CampaignsService {
    * deterministic function of what they specified rather than of the promoter
    * pool at the moment of quoting.
    */
-  async quote(userId: string, campaignId: string): Promise<QuoteDto> {
+  async quote(userId: string, campaignId: string, opts?: { priceMinor?: number }): Promise<QuoteDto> {
     const campaign = await this.ownedCampaign(userId, campaignId);
     this.assertEditable(campaign);
 
@@ -224,21 +225,43 @@ export class CampaignsService {
     // the chosen role's category).
     const defaults = await this.rateConfig.getCategoryDefaults(category);
     const reachPerSlot = filters.minEffectiveReach > 0 ? filters.minEffectiveReach : defaults.reachPerSlot;
-    const unitPrice = slotPriceMinor(reachPerSlot, campaign.objective, filters, config);
-    // §multi-day: unitPrice is the price of ONE post. A recurring campaign is N
-    // posts per slot, so the campaign total scales by postsRequired.
+    // §multi-day: a slot is `postsRequired` posts, so campaign economics scale by it.
     const posts = campaign.postsRequired;
-    const totalPrice = unitPrice * BigInt(campaign.slotsTotal) * BigInt(posts);
-
-    // Category floor (governing logic #2): a campaign cannot be booked below its
-    // category's minimum fee. Enforced here, at the commit point, not in plan().
     const floorMinor = await this.rateConfig.getCategoryFloorMinor(category);
-    if (totalPrice < floorMinor) {
-      throw new BadRequestException(
-        `A ${categoryLabel(category)} campaign must be at least ${formatNaira(floorMinor)}. ` +
-          `At ${campaign.slotsTotal} slot(s)${posts > 1 ? ` × ${posts} posts` : ''} × ${reachPerSlot} reach this prices to ` +
-          `${formatNaira(totalPrice)} — raise the slot count or the reach per slot.`,
-      );
+
+    let slotsTotal: number;
+    let unitPrice: bigint; // per-post slot price
+    let totalPrice: bigint;
+
+    if (opts?.priceMinor !== undefined) {
+      // Price-driven (governing logic #2): the client's exact amount is charged
+      // as-is. The promoter count is DERIVED from it — nothing is snapped.
+      totalPrice = BigInt(opts.priceMinor);
+      if (totalPrice < floorMinor) {
+        throw new BadRequestException(
+          `A ${categoryLabel(category)} campaign must be at least ${formatNaira(floorMinor)}. ` +
+            `You entered ${formatNaira(totalPrice)} — raise it to at least the minimum for this category.`,
+        );
+      }
+      const sized = sizeFromPrice(totalPrice, campaign.objective, filters, reachPerSlot * posts, config);
+      slotsTotal = sized.slots;
+      // Per-post unit is the exact price spread across slots × posts, floored so the
+      // sum of slot grosses never exceeds escrow; the ≤(slots×posts) kobo remainder
+      // stays in escrow as Ralia's take. campaign.priceMinor stays the exact total.
+      const units = BigInt(slotsTotal) * BigInt(posts);
+      unitPrice = units > 0n ? totalPrice / units : totalPrice;
+    } else {
+      // Legacy slot-count pricing: unit price × the client's slot count.
+      unitPrice = slotPriceMinor(reachPerSlot, campaign.objective, filters, config);
+      slotsTotal = campaign.slotsTotal;
+      totalPrice = unitPrice * BigInt(slotsTotal) * BigInt(posts);
+      if (totalPrice < floorMinor) {
+        throw new BadRequestException(
+          `A ${categoryLabel(category)} campaign must be at least ${formatNaira(floorMinor)}. ` +
+            `At ${slotsTotal} slot(s)${posts > 1 ? ` × ${posts} posts` : ''} × ${reachPerSlot} reach this prices to ` +
+            `${formatNaira(totalPrice)} — raise the slot count or the reach per slot.`,
+        );
+      }
     }
 
     const { promoterFeeMinor } = splitFee(unitPrice, config);
@@ -252,7 +275,7 @@ export class CampaignsService {
     await this.prisma.$transaction([
       this.prisma.campaignSlot.deleteMany({ where: { campaignId } }),
       this.prisma.campaignSlot.createMany({
-        data: Array.from({ length: campaign.slotsTotal }, () => ({
+        data: Array.from({ length: slotsTotal }, () => ({
           campaignId,
           role,
           unitPriceMinor: unitPrice,
@@ -265,6 +288,7 @@ export class CampaignsService {
           status: CampaignStatus.QUOTED,
           priceMinor: totalPrice,
           budgetMinor: totalPrice,
+          slotsTotal,
           quotedAt: new Date(),
         },
       }),
@@ -274,7 +298,7 @@ export class CampaignsService {
       price: toMoney(totalPrice),
       unit_price: toMoney(unitPrice),
       promoter_fee: toMoney(promoterFeeMinor),
-      slots_total: campaign.slotsTotal,
+      slots_total: slotsTotal,
       posts_required: posts,
       estimated_reach: reach * posts,
       eligible_promoters: count,
@@ -291,7 +315,7 @@ export class CampaignsService {
   async plan(
     userId: string,
     campaignId: string,
-    driver: { budgetMinor?: number; slots?: number },
+    driver: { priceMinor?: number; budgetMinor?: number; slots?: number },
   ): Promise<CampaignPlanDto> {
     const campaign = await this.ownedCampaign(userId, campaignId);
     this.assertEditable(campaign);
@@ -309,37 +333,51 @@ export class CampaignsService {
     // works against is perPost × posts. This keeps the preview identical to quote().
     const posts = campaign.postsRequired;
     const slotCost = perPost * BigInt(posts);
+    const floorMinor = await this.rateConfig.getCategoryFloorMinor(category);
 
-    // Budget wins if both are given: floor(budget / slotCost) slots. A budget below one
-    // slot yields zero — the UI shows "raise your budget". Otherwise price the slots.
     let slots: number;
-    if (driver.budgetMinor !== undefined) {
-      slots = slotCost > 0n ? Number(BigInt(driver.budgetMinor) / slotCost) : 0;
-    } else if (driver.slots !== undefined) {
-      slots = driver.slots;
-    } else {
-      slots = campaign.slotsTotal;
-    }
-    slots = Math.min(Math.max(slots, 0), 10000);
+    let totalPrice: bigint;
+    let estimatedTotalReach: number;
 
-    const totalPrice = slotCost * BigInt(slots);
-    const { promoterFeeMinor } = splitFee(slotCost, config);
+    if (driver.priceMinor !== undefined) {
+      // Price-driven (governing logic #2): the typed price is what the client pays,
+      // exactly. Promoter count and reach are DERIVED from it; nothing snaps the price.
+      totalPrice = BigInt(Math.max(0, driver.priceMinor));
+      const sized = sizeFromPrice(totalPrice, campaign.objective, filters, reachPerSlot * posts, config);
+      slots = sized.slots;
+      estimatedTotalReach = sized.totalReach;
+    } else {
+      // Legacy budget/slot drivers (snap to whole slots). Budget wins if both given.
+      if (driver.budgetMinor !== undefined) {
+        slots = slotCost > 0n ? Number(BigInt(driver.budgetMinor) / slotCost) : 0;
+      } else if (driver.slots !== undefined) {
+        slots = driver.slots;
+      } else {
+        slots = campaign.slotsTotal;
+      }
+      slots = Math.min(Math.max(slots, 0), 10000);
+      totalPrice = slotCost * BigInt(slots);
+      estimatedTotalReach = slots * reachPerSlot * posts;
+    }
+
+    // unit_price shown per slot: the exact price ÷ slots when price-driven, else the
+    // computed slot cost.
+    const unitPriceShown = driver.priceMinor !== undefined && slots > 0 ? totalPrice / BigInt(slots) : slotCost;
+    const { promoterFeeMinor } = splitFee(unitPriceShown, config);
 
     // Floor for the slider (governing logic #2): the UI clamps the slider's minimum
-    // to the category floor and pre-fills the category defaults. The preview itself
-    // stays honest to the driver; quote() is the hard gate.
-    const floorMinor = await this.rateConfig.getCategoryFloorMinor(category);
+    // to floor_minor. The preview itself stays honest to the driver; quote() is the
+    // hard gate.
     const minSlots = slotCost > 0n ? Number((floorMinor + slotCost - 1n) / slotCost) : 0; // ceil
 
     return {
-      // unit_price is the per-SLOT cost (all its posts) — the slider steps by this.
-      unit_price: toMoney(slotCost),
+      unit_price: toMoney(unitPriceShown),
       slots,
       posts_required: posts,
       total_price: toMoney(totalPrice),
       promoter_fee: toMoney(promoterFeeMinor),
       reach_per_slot: reachPerSlot,
-      estimated_total_reach: slots * reachPerSlot * posts,
+      estimated_total_reach: estimatedTotalReach,
       category,
       floor_minor: toMoney(floorMinor),
       min_slots: minSlots,

@@ -362,22 +362,49 @@ export class CampaignTargetingView {
   @ApiProperty({ type: [String] }) roles!: string[];
 }
 
-/** Drive a stateless quote preview by a budget or a slot count (budget wins if both given). */
+/**
+ * Drive a stateless quote preview. The primary driver is `price_minor` — the
+ * exact amount the client chose to spend, which is charged as-is (governing logic
+ * #2: price is authoritative; only the promoter count rounds). `budget_minor` and
+ * `slots` are the legacy slot-count drivers, kept for back-compat. Precedence:
+ * price_minor › budget_minor › slots.
+ */
 export class PlanRequestDto {
-  @ApiPropertyOptional({ example: 500000, description: 'Budget in kobo — solves for how many slots it buys.' })
+  @ApiPropertyOptional({ example: 120000, description: 'Exact campaign price in kobo — charged as-is; solves for reach and promoter count.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  price_minor?: number;
+
+  @ApiPropertyOptional({ example: 500000, description: 'Legacy: budget in kobo — solves for how many whole slots it buys.' })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
   budget_minor?: number;
 
-  @ApiPropertyOptional({ example: 12, description: 'Slot count — prices that many slots directly.' })
+  @ApiPropertyOptional({ example: 12, description: 'Legacy: slot count — prices that many slots directly.' })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
   @Max(10000)
   slots?: number;
+}
+
+/**
+ * Commit a quote. With `price_minor` the campaign is priced at that EXACT amount
+ * (validated against the category floor) and the promoter count is derived from
+ * it. Without it, quote falls back to the legacy slot-count pricing.
+ */
+export class QuoteRequestDto {
+  @ApiPropertyOptional({ example: 120000, description: 'Exact campaign price in kobo to freeze. Must clear the category floor.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  price_minor?: number;
 }
 
 /** Read-only pricing preview for the budget↔reach slider — persists nothing. */

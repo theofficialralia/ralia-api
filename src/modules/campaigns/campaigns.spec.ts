@@ -271,6 +271,22 @@ describe('campaigns — draft, targeting, pricing', () => {
     expect(q.body.unit_price.amount_minor).toBe(300000);
   });
 
+  it('price-driven quote charges the exact amount and derives the promoter count', async () => {
+    const id = await createDraft();
+    // AWARENESS, RPM 300,000, default reach 1,000/slot: ₦30,000 buys 10,000 reach
+    // ÷ 1,000 = 10 promoters. The price is frozen exactly — never snapped.
+    const q = await http().post(`/campaigns/${id}/quote`).set(auth()).send({ price_minor: 3_000_000 }).expect(201);
+    expect(q.body.price.amount_minor).toBe(3_000_000);
+    expect(q.body.slots_total).toBe(10);
+    expect(q.body.unit_price.amount_minor).toBe(300_000);
+  });
+
+  it('rejects a price-driven quote below the category floor', async () => {
+    const id = await createDraft();
+    // ₦10,000 < the ₦15,000 Distribution floor — a clear rejection, never a silent bump.
+    await http().post(`/campaigns/${id}/quote`).set(auth()).send({ price_minor: 1_000_000 }).expect(400);
+  });
+
   it('moves a quoted campaign to PENDING_APPROVAL on submit', async () => {
     const id = await createDraft();
     await http().put(`/campaigns/${id}/targeting`).set(auth()).send({ min_effective_reach: 1000 }).expect(200);
