@@ -125,6 +125,10 @@ describe('payments — Paystack verify + fund', () => {
     expect(gp.expectedMinor).toBe(PRICE);
     expect(gp.gatewayMinor).toBe(PRICE);
     expect(gp.ledgerTransactionId).not.toBeNull();
+
+    // The owner is told their campaign is live.
+    const live = await prisma.notification.findFirst({ where: { userId: ownerId, type: 'campaign.live' } });
+    expect(live).not.toBeNull();
   });
 
   it('rejects a payment whose amount does not match the price', async () => {

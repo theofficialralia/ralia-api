@@ -3,6 +3,7 @@ import { AccountKind, Campaign, CampaignStatus } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { AuditService } from '../admin/audit.service';
+import { NotificationService } from '../notifications/notification.service';
 import { PaystackService } from './paystack.service';
 
 /**
@@ -20,6 +21,7 @@ export class PaymentsService {
     private readonly ledger: LedgerService,
     private readonly audit: AuditService,
     private readonly paystack: PaystackService,
+    private readonly notifications: NotificationService,
   ) {}
 
   private readonly logger = new Logger(PaymentsService.name);
@@ -157,6 +159,23 @@ export class PaymentsService {
           },
           tx,
         );
+
+        // Tell the owner their campaign is live (§notifications). dedupeKey shares the
+        // admin manual-fund path's key, so a campaign is only ever announced live once.
+        const org = await tx.clientOrg.findUnique({ where: { id: campaign.clientOrgId }, select: { ownerUserId: true } });
+        if (org?.ownerUserId) {
+          await this.notifications.create(
+            {
+              userId: org.ownerUserId,
+              type: 'campaign.live',
+              title: 'Campaign is live 🚀',
+              body: `"${campaign.name}" is funded and live — we're now matching it to promoters. Track delivery from your dashboard.`,
+              data: { campaignId },
+              dedupeKey: `campaign.live:${campaignId}`,
+            },
+            tx,
+          );
+        }
       });
     }
 

@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Cadence, Campaign, CampaignStatus, Prisma, PromoterRole } from '@prisma/client';
+import { Cadence, Campaign, CampaignObjective, CampaignStatus, Prisma, PromoterRole } from '@prisma/client';
 import { buildEligibility } from '../../common/eligibility/eligibility';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
@@ -66,6 +66,12 @@ export class CampaignsService {
   async create(userId: string, dto: CreateCampaignDto): Promise<CampaignDto> {
     const orgId = await this.orgIdFor(userId);
 
+    // A destination link is where clicks go, so it's required for every click-driven
+    // objective; AWARENESS is views-only and may omit it.
+    if (dto.objective !== CampaignObjective.AWARENESS && !dto.destination_url) {
+      throw new BadRequestException('A destination link is required for this objective (only Awareness campaigns can skip it).');
+    }
+
     const campaign = await this.prisma.campaign.create({
       data: {
         clientOrgId: orgId,
@@ -73,7 +79,7 @@ export class CampaignsService {
         objective: dto.objective,
         description: dto.description ?? null,
         promoterInstructions: dto.promoter_instructions ?? null,
-        destinationUrl: dto.destination_url,
+        destinationUrl: dto.destination_url ?? null,
         status: CampaignStatus.DRAFT,
         // budget is only known once priced; 0 until a quote is accepted.
         budgetMinor: 0n,

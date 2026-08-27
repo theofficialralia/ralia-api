@@ -77,10 +77,14 @@ export class CreateCampaignDto {
   @MaxLength(2000)
   promoter_instructions?: string;
 
-  @ApiProperty({ example: 'https://naijathreads.example/shop' })
+  @ApiPropertyOptional({
+    example: 'https://naijathreads.example/shop',
+    description: 'Where clicks are sent. Required for click-driven objectives; optional for AWARENESS (views-only).',
+  })
+  @IsOptional()
   @IsUrl({ require_protocol: true })
   @MaxLength(400)
-  destination_url!: string;
+  destination_url?: string;
 
   @ApiProperty({ example: 12, minimum: 1, maximum: 500, description: 'How many promoter slots.' })
   @IsInt()

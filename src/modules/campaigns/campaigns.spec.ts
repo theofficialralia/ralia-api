@@ -157,6 +157,21 @@ describe('campaigns — draft, targeting, pricing', () => {
     return res.body.id;
   }
 
+  // ── Destination link (optional only for AWARENESS) ───────
+
+  it('allows an AWARENESS campaign with no destination link (views-only)', async () => {
+    const res = await http().post('/campaigns').set(auth())
+      .send({ name: 'Just Reach', objective: CampaignObjective.AWARENESS, slots_total: 5 })
+      .expect(201);
+    expect(res.body.destination_url).toBeNull();
+  });
+
+  it('rejects a click-driven campaign with no destination link', async () => {
+    await http().post('/campaigns').set(auth())
+      .send({ name: 'Buy Now', objective: CampaignObjective.PURCHASE, slots_total: 5 })
+      .expect(400);
+  });
+
   // ── Lifecycle ────────────────────────────────────────────
 
   it('creates a draft with an empty targeting row', async () => {
