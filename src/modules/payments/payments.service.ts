@@ -91,9 +91,17 @@ export class PaymentsService {
       return { status: campaign.status, message: 'Payment already recorded.' };
     }
 
-    const fundable: CampaignStatus[] = [CampaignStatus.QUOTED, CampaignStatus.CONFIRMING_PAYMENT];
+    // Admin approval is mandatory before any money moves: a campaign is fundable
+    // ONLY once an admin has approved it (PENDING_APPROVAL → CONFIRMING_PAYMENT).
+    // Paying straight from QUOTED is no longer allowed — nothing goes live without
+    // a human review (e.g. against prohibited/contraband content).
+    const fundable: CampaignStatus[] = [CampaignStatus.CONFIRMING_PAYMENT];
     if (!fundable.includes(campaign.status)) {
-      throw new ConflictException(`A ${campaign.status} campaign cannot be funded.`);
+      const hint =
+        campaign.status === CampaignStatus.QUOTED || campaign.status === CampaignStatus.PENDING_APPROVAL
+          ? ' It must be approved by an admin before payment.'
+          : '';
+      throw new ConflictException(`A ${campaign.status} campaign cannot be funded.${hint}`);
     }
 
     // Confirm the charge with Paystack before any money moves.

@@ -83,14 +83,14 @@ describe('payments — Paystack verify + fund', () => {
   const bearer = (id: string) => ({ Authorization: `Bearer ${jwt.sign({ sub: id, roles: [Role.CLIENT] }, { secret: process.env.JWT_ACCESS_SECRET })}` });
   const key = () => ({ 'Idempotency-Key': randomUUID() });
 
-  async function quotedCampaign(): Promise<{ ownerId: string; campaignId: string }> {
+  async function approvedCampaign(): Promise<{ ownerId: string; campaignId: string }> {
     const n = seq++;
     const owner = await prisma.user.create({ data: { email: `c${n}@x.com`, phoneE164: `+23480${String(n).padStart(9, '0')}`, passwordHash: 'x', status: 'ACTIVE', roles: { create: { role: Role.CLIENT } } } });
     const org = await prisma.clientOrg.create({ data: { ownerUserId: owner.id, name: `Org${n}` } });
     const campaign = await prisma.campaign.create({
       data: {
         clientOrgId: org.id, name: `C${n}`, objective: CampaignObjective.AWARENESS, destinationUrl: 'https://x.example',
-        status: CampaignStatus.QUOTED, budgetMinor: PRICE, priceMinor: PRICE, slotsTotal: 1, quotedAt: new Date(),
+        status: CampaignStatus.CONFIRMING_PAYMENT, budgetMinor: PRICE, priceMinor: PRICE, slotsTotal: 1, quotedAt: new Date(), approvedAt: new Date(),
         slots: { create: [{ role: PromoterRole.DISTRIBUTOR, unitPriceMinor: PRICE, status: SlotStatus.OPEN }] },
       },
     });
@@ -107,7 +107,7 @@ describe('payments — Paystack verify + fund', () => {
   }
 
   it('funds the campaign and goes LIVE when Paystack confirms the exact amount', async () => {
-    const { ownerId, campaignId } = await quotedCampaign();
+    const { ownerId, campaignId } = await approvedCampaign();
     const res = await http().post(`/campaigns/${campaignId}/payments/paystack/verify`).set(bearer(ownerId)).set(key())
       .send({ reference: 'RLA-abc-123' }).expect(200);
 
@@ -128,17 +128,17 @@ describe('payments — Paystack verify + fund', () => {
   });
 
   it('rejects a payment whose amount does not match the price', async () => {
-    const { ownerId, campaignId } = await quotedCampaign();
+    const { ownerId, campaignId } = await approvedCampaign();
     paystack.next = { status: 'success', amountMinor: Number(PRICE) - 100, currency: 'NGN', reference: 'x' };
     await http().post(`/campaigns/${campaignId}/payments/paystack/verify`).set(bearer(ownerId)).set(key())
       .send({ reference: 'RLA-abc-124' }).expect(400);
     const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-    expect(campaign.status).toBe(CampaignStatus.QUOTED);
+    expect(campaign.status).toBe(CampaignStatus.CONFIRMING_PAYMENT);
     expect(await prisma.ledgerTransaction.count()).toBe(0);
   });
 
   it('rejects a payment Paystack did not mark successful', async () => {
-    const { ownerId, campaignId } = await quotedCampaign();
+    const { ownerId, campaignId } = await approvedCampaign();
     paystack.next = { status: 'failed', amountMinor: Number(PRICE), currency: 'NGN', reference: 'x' };
     await http().post(`/campaigns/${campaignId}/payments/paystack/verify`).set(bearer(ownerId)).set(key())
       .send({ reference: 'RLA-abc-125' }).expect(400);
@@ -146,7 +146,7 @@ describe('payments — Paystack verify + fund', () => {
   });
 
   it('is idempotent on the Paystack reference — same reference funds once', async () => {
-    const { ownerId, campaignId } = await quotedCampaign();
+    const { ownerId, campaignId } = await approvedCampaign();
     const ref = 'RLA-dup-777';
     for (let i = 0; i < 3; i++) {
       await http().post(`/campaigns/${campaignId}/payments/paystack/verify`).set(bearer(ownerId)).set(key())
@@ -159,23 +159,33 @@ describe('payments — Paystack verify + fund', () => {
   });
 
   it('requires an Idempotency-Key', async () => {
-    const { ownerId, campaignId } = await quotedCampaign();
+    const { ownerId, campaignId } = await approvedCampaign();
     await http().post(`/campaigns/${campaignId}/payments/paystack/verify`).set(bearer(ownerId))
       .send({ reference: 'x' }).expect(400);
   });
 
   it('a client cannot fund another client’s campaign', async () => {
-    const a = await quotedCampaign();
-    const b = await quotedCampaign();
+    const a = await approvedCampaign();
+    const b = await approvedCampaign();
     await http().post(`/campaigns/${a.campaignId}/payments/paystack/verify`).set(bearer(b.ownerId)).set(key())
       .send({ reference: 'RLA-x' }).expect(404);
   });
 
   it('cannot fund a campaign that is not awaiting payment', async () => {
-    const { ownerId, campaignId } = await quotedCampaign();
+    const { ownerId, campaignId } = await approvedCampaign();
     await prisma.campaign.update({ where: { id: campaignId }, data: { status: CampaignStatus.LIVE } });
     await http().post(`/campaigns/${campaignId}/payments/paystack/verify`).set(bearer(ownerId)).set(key())
       .send({ reference: 'RLA-y' }).expect(409);
+  });
+
+  it('cannot fund a QUOTED campaign that has not been approved — admin approval is mandatory', async () => {
+    const { ownerId, campaignId } = await approvedCampaign();
+    // Roll it back to QUOTED (as if it were never approved) and confirm payment is refused.
+    await prisma.campaign.update({ where: { id: campaignId }, data: { status: CampaignStatus.QUOTED } });
+    await http().post(`/campaigns/${campaignId}/payments/paystack/verify`).set(bearer(ownerId)).set(key())
+      .send({ reference: 'RLA-unapproved' }).expect(409);
+    expect(await prisma.ledgerTransaction.count()).toBe(0);
+    expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).status).toBe(CampaignStatus.QUOTED);
   });
 
   // ── Webhook backstop ─────────────────────────────────────
@@ -184,7 +194,7 @@ describe('payments — Paystack verify + fund', () => {
     http().post('/payments/paystack/webhook').set('x-paystack-signature', signature).send(body as object);
 
   it('a signed charge.success webhook funds the campaign even without the client callback', async () => {
-    const { campaignId } = await quotedCampaign();
+    const { campaignId } = await approvedCampaign();
 
     await webhook({ event: 'charge.success', data: { reference: 'RLA-hook-1', metadata: { campaign_id: campaignId } } }, 'good').expect(200);
 
@@ -194,23 +204,23 @@ describe('payments — Paystack verify + fund', () => {
   });
 
   it('rejects a webhook with a bad signature and moves no money', async () => {
-    const { campaignId } = await quotedCampaign();
+    const { campaignId } = await approvedCampaign();
 
     await webhook({ event: 'charge.success', data: { reference: 'RLA-hook-2', metadata: { campaign_id: campaignId } } }, 'forged').expect(401);
 
-    expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).status).toBe(CampaignStatus.QUOTED);
+    expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).status).toBe(CampaignStatus.CONFIRMING_PAYMENT);
   });
 
   it('ignores a non-charge.success event', async () => {
-    const { campaignId } = await quotedCampaign();
+    const { campaignId } = await approvedCampaign();
 
     await webhook({ event: 'charge.failed', data: { reference: 'RLA-hook-3', metadata: { campaign_id: campaignId } } }, 'good').expect(200);
 
-    expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).status).toBe(CampaignStatus.QUOTED);
+    expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).status).toBe(CampaignStatus.CONFIRMING_PAYMENT);
   });
 
   it('is idempotent with the client verify — the same reference funds once', async () => {
-    const { ownerId, campaignId } = await quotedCampaign();
+    const { ownerId, campaignId } = await approvedCampaign();
     await http().post(`/campaigns/${campaignId}/payments/paystack/verify`).set(bearer(ownerId)).set(key())
       .send({ reference: 'RLA-hook-4' }).expect(200);
 
