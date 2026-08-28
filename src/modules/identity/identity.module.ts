@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { MAILER, Mailer } from '../../common/mailer/mailer';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { GoogleAuthService } from './google-auth.service';
 import { OtpService } from './otp.service';
 import { ConsoleOtpProvider } from './providers/console-otp.provider';
 import { EmailOtpProvider } from './providers/email-otp.provider';
@@ -62,6 +63,7 @@ function buildOtpProvider(config: ConfigService, mailer: Mailer): OtpProvider {
   controllers: [AuthController],
   providers: [
     AuthService,
+    GoogleAuthService,
     OtpService,
     SessionService,
     {

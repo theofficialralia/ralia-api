@@ -9,6 +9,7 @@ import { JwtAuthGuard } from '../../common/auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/auth/roles.guard';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { GoogleAuthService } from './google-auth.service';
 import { IdentityModule } from './identity.module';
 import { OTP_PROVIDER, OtpProvider, OtpRecipient } from './providers/otp-provider';
 import { testPrisma } from '../../../test/test-db';
@@ -32,10 +33,21 @@ class CapturingOtpProvider implements OtpProvider {
   }
 }
 
+/** A stand-in for Google's verifier — the test sets what the next token resolves to. */
+class FakeGoogleAuth {
+  next: { email: string; emailVerified: boolean; name: string | null; sub: string } = {
+    email: 'g@example.com', emailVerified: true, name: 'G User', sub: 'sub-1',
+  };
+  verify(_idToken: string) {
+    return Promise.resolve(this.next);
+  }
+}
+
 describe('identity — auth', () => {
   let app: INestApplication;
   let prisma: PrismaClient;
   let otp: CapturingOtpProvider;
+  const google = new FakeGoogleAuth();
 
   const promoter = {
     email: 'ada@example.com',
@@ -73,6 +85,8 @@ describe('identity — auth', () => {
       .useValue(prisma)
       .overrideProvider(OTP_PROVIDER)
       .useValue(otp)
+      .overrideProvider(GoogleAuthService)
+      .useValue(google)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -362,5 +376,32 @@ describe('identity — auth', () => {
 
   it('change-password requires authentication', async () => {
     await http().post('/auth/change-password').send({ current_password: 'x', new_password: 'a long enough one' }).expect(401);
+  });
+
+  // ── Sign in with Google ──────────────────────────────────
+
+  it('creates an ACTIVE, phone-less promoter on first Google sign-in and returns tokens', async () => {
+    google.next = { email: 'newbie@gmail.com', emailVerified: true, name: 'New Bie', sub: 's-100' };
+    const res = await http().post('/auth/google').send({ id_token: 'tok', role: Role.PROMOTER }).expect(200);
+    expect(res.body.access_token).toBeTruthy();
+
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: 'newbie@gmail.com' }, include: { roles: true, promoterProfile: true } });
+    expect(user.status).toBe('ACTIVE');
+    expect(user.phoneE164).toBeNull();
+    expect(user.roles.map((r) => r.role)).toContain(Role.PROMOTER);
+    expect(user.promoterProfile).not.toBeNull();
+  });
+
+  it('logs an existing user in via Google without creating a duplicate', async () => {
+    google.next = { email: 'again@gmail.com', emailVerified: true, name: 'A Gain', sub: 's-1' };
+    await http().post('/auth/google').send({ id_token: 'tok', role: Role.PROMOTER }).expect(200);
+    await http().post('/auth/google').send({ id_token: 'tok', role: Role.PROMOTER }).expect(200);
+    expect(await prisma.user.count({ where: { email: 'again@gmail.com' } })).toBe(1);
+  });
+
+  it('refuses a Google account whose email is not verified', async () => {
+    google.next = { email: 'unverified@gmail.com', emailVerified: false, name: null, sub: 's-2' };
+    await http().post('/auth/google').send({ id_token: 'tok', role: Role.PROMOTER }).expect(400);
+    expect(await prisma.user.count({ where: { email: 'unverified@gmail.com' } })).toBe(0);
   });
 });

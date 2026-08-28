@@ -93,6 +93,17 @@ export class LoginDto {
   password!: string;
 }
 
+export class GoogleSignInDto {
+  @ApiProperty({ description: 'The Google ID token (JWT) from Google Identity Services.' })
+  @IsString()
+  @MaxLength(4096)
+  id_token!: string;
+
+  @ApiProperty({ enum: ['CLIENT', 'PROMOTER'], description: 'Which kind of account to create on first sign-in.' })
+  @IsEnum(Role, { message: 'role must be CLIENT or PROMOTER' })
+  role!: Extract<Role, 'CLIENT' | 'PROMOTER'>;
+}
+
 export class OtpRequestDto {
   @ApiProperty({ example: '+2348012345678' })
   @IsString()

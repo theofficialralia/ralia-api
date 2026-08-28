@@ -17,6 +17,7 @@ import { AuthService } from './auth.service';
 import {
   AcceptedDto,
   ChangePasswordDto,
+  GoogleSignInDto,
   LoginDto,
   MeDto,
   OtpRequestDto,
@@ -84,6 +85,19 @@ export class AuthController {
   @ApiForbiddenResponse({ description: 'Account suspended, or phone not yet verified (code PHONE_NOT_VERIFIED).' })
   login(@Body() dto: LoginDto, @Req() req: Request): Promise<TokenPairDto> {
     return this.auth.login(dto, req.headers['user-agent']);
+  }
+
+  @Public()
+  @Post('google')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Sign in with Google',
+    description: 'Verifies a Google ID token and logs the person in, creating the account on first use. 503 if Google sign-in is not configured on the server.',
+  })
+  @ApiOkResponse({ type: TokenPairDto })
+  google(@Body() dto: GoogleSignInDto, @Req() req: Request): Promise<TokenPairDto> {
+    return this.auth.googleSignIn(dto.id_token, dto.role, req.headers['user-agent']);
   }
 
   @Public()

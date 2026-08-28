@@ -17,6 +17,7 @@ import * as argon2 from 'argon2';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { LoginDto, RegisterDto, RegisterResponseDto, TokenPairDto } from './dto/auth.dto';
+import { GoogleAuthService } from './google-auth.service';
 import { OtpService } from './otp.service';
 import { SessionService } from './session.service';
 
@@ -30,6 +31,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly otp: OtpService,
     private readonly sessions: SessionService,
+    private readonly google: GoogleAuthService,
   ) {}
 
   private get policyVersion(): string {
@@ -121,9 +123,79 @@ export class AuthService {
       return created;
     });
 
-    await this.otp.issue(user.id, user.phoneE164, OtpPurpose.PHONE_VERIFY);
+    // Password/phone registration always carries a phone (validated above); social
+    // sign-in uses a different path that never reaches here.
+    await this.otp.issue(user.id, user.phoneE164!, OtpPurpose.PHONE_VERIFY);
 
     return { user_id: user.id, status: user.status, next: 'VERIFY_PHONE' };
+  }
+
+  /**
+   * "Sign in with Google": verify the Google ID token, then log the person in —
+   * creating the account on first use. Google has already verified the email, so
+   * there is no OTP step; a new account is ACTIVE immediately. Phone is collected
+   * later (it's needed before payout), so a Google account starts phone-less.
+   */
+  async googleSignIn(idToken: string, role: Role, userAgent?: string): Promise<TokenPairDto> {
+    const identity = await this.google.verify(idToken);
+    if (!identity.emailVerified) {
+      throw new BadRequestException('Your Google email is not verified, so we can’t sign you in with it.');
+    }
+
+    const existing = await this.prisma.user.findUnique({
+      where: { email: identity.email },
+      include: { roles: true },
+    });
+
+    if (existing) {
+      if (existing.deletedAt) throw new UnauthorizedException('This account is closed.');
+      // Email is Google-verified, so a still-PENDING account can go straight ACTIVE.
+      const updated =
+        existing.status === UserStatus.PENDING
+          ? await this.prisma.user.update({
+              where: { id: existing.id },
+              data: { status: UserStatus.ACTIVE, emailVerifiedAt: new Date() },
+              include: { roles: true },
+            })
+          : existing;
+      return this.sessions.issue(updated.id, updated.roles.map((r) => r.role), userAgent);
+    }
+
+    // First sign-in — create the account. A random password stands in (they sign in
+    // with Google); consent is captured the same way the button presents it.
+    const now = new Date();
+    const passwordHash = await argon2.hash(randomBytes(32).toString('hex'));
+    const created = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email: identity.email,
+          passwordHash,
+          status: UserStatus.ACTIVE,
+          emailVerifiedAt: now,
+          roles: { create: { role } },
+          consents: {
+            create: [
+              { purpose: ConsentPurpose.TERMS_OF_SERVICE, granted: true, grantedAt: now, policyVersion: this.policyVersion },
+              { purpose: ConsentPurpose.PRIVACY_POLICY, granted: true, grantedAt: now, policyVersion: this.policyVersion },
+            ],
+          },
+        },
+        include: { roles: true },
+      });
+
+      if (role === Role.CLIENT) {
+        await tx.clientOrg.create({
+          data: { ownerUserId: user.id, name: identity.name?.trim() || 'My Business', status: ClientOrgStatus.ACTIVE },
+        });
+      } else {
+        await tx.promoterProfile.create({
+          data: { userId: user.id, status: PromoterStatus.PROFILE_INCOMPLETE, fullName: identity.name?.trim() ?? null },
+        });
+      }
+      return user;
+    });
+
+    return this.sessions.issue(created.id, created.roles.map((r) => r.role), userAgent);
   }
 
   /**

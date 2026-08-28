@@ -66,7 +66,10 @@ enum ClientOrgStatus {
 model User {
   id              String     @id @default(uuid()) @db.Uuid
   email           String     @unique
-  phoneE164       String     @unique @map("phone_e164")
+  // Nullable so social sign-in (Google) can create an account without a phone.
+  // Postgres allows many NULLs under a UNIQUE index, so uniqueness still holds for
+  // real numbers. Phone is collected later, before payout, for phone-based flows.
+  phoneE164       String?    @unique @map("phone_e164")
   passwordHash    String     @map("password_hash")
   status          UserStatus @default(PENDING)
   emailVerifiedAt DateTime?  @map("email_verified_at")
