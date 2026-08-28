@@ -1592,12 +1592,25 @@ export class AdminService {
       include: { roles: { where: { role: Role.ADMIN }, select: { capabilities: true } } },
       orderBy: { createdAt: 'asc' },
     });
-    return admins.map((u) => ({
-      id: u.id,
-      email: u.email,
-      status: u.status,
-      capabilities: [...new Set(u.roles.flatMap((r) => r.capabilities))],
-    }));
+    const invites = await this.prisma.adminInvite.findMany({
+      where: { status: 'PENDING' },
+      orderBy: { createdAt: 'desc' },
+    });
+    return {
+      admins: admins.map((u) => ({
+        id: u.id,
+        email: u.email,
+        status: u.status,
+        capabilities: [...new Set(u.roles.flatMap((r) => r.capabilities))],
+      })),
+      pending_invites: invites.map((i) => ({
+        id: i.id,
+        email: i.email,
+        capabilities: i.capabilities,
+        expires_at: i.expiresAt.toISOString(),
+        created_at: i.createdAt.toISOString(),
+      })),
+    };
   }
 
   // ── Analytics: platform overview ─────────────────────────

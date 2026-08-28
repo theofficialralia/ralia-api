@@ -405,8 +405,7 @@ export class AdminController {
   }
 
   @Get('team')
-  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
-  @ApiOperation({ summary: 'Admin team', description: 'Admins and their capabilities.' })
+  @ApiOperation({ summary: 'Admin team', description: 'Admins, their capabilities, and pending invites. Any admin may view; managing needs MANAGE_TEAM.' })
   team() {
     return this.admin.team();
   }

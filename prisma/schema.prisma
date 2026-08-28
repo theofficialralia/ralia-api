@@ -39,6 +39,9 @@ enum Role {
 enum AdminCapability {
   REVIEW_EVIDENCE
   RECORD_MONEY
+  // Invite, edit and suspend other admins (team management). Held separately so
+  // most admins can review/record without being able to change the team.
+  MANAGE_TEAM
 }
 
 enum OtpPurpose {
@@ -96,6 +99,7 @@ model User {
   approvedCampaigns Campaign[]          @relation("CampaignApprover")
   reviewedSubmissions Submission[]      @relation("SubmissionReviewer")
   approvedWithdrawals Withdrawal[]      @relation("WithdrawalApprover")
+  adminInvitesSent    AdminInvite[]     @relation("AdminInviteInviter")
   createdTransactions LedgerTransaction[] @relation("TransactionCreator")
   uploadedFiles    File[]               @relation("FileUploader")
   notifications    Notification[]
@@ -321,6 +325,34 @@ model PromoterProfile {
   @@index([status, trustScore])
   @@index([locationState])
   @@map("promoter_profiles")
+}
+
+enum AdminInviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+}
+
+// An invitation for someone to join the admin team with a set of capabilities.
+// The raw token is emailed once and only its hash is stored; accepting it creates
+// (or upgrades) the user to an admin. §7 RBAC.
+model AdminInvite {
+  id           String            @id @default(uuid()) @db.Uuid
+  email        String
+  capabilities AdminCapability[]
+  tokenHash    String            @map("token_hash")
+  status       AdminInviteStatus @default(PENDING)
+  invitedById  String            @map("invited_by_id") @db.Uuid
+  expiresAt    DateTime          @map("expires_at")
+  acceptedAt   DateTime?         @map("accepted_at")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  invitedBy User @relation("AdminInviteInviter", fields: [invitedById], references: [id])
+
+  @@index([email])
+  @@index([status])
+  @@map("admin_invites")
 }
 
 model PromoterBankAccount {

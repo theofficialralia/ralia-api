@@ -190,8 +190,9 @@ async function main() {
       roles: {
         create: {
           role: Role.ADMIN,
-          // Both capabilities at launch, but held separately — handoff §7.
-          capabilities: ['REVIEW_EVIDENCE', 'RECORD_MONEY'],
+          // The founding admin holds every capability, including team management —
+          // held separately per handoff §7 so they can be granted piecemeal to others.
+          capabilities: ['REVIEW_EVIDENCE', 'RECORD_MONEY', 'MANAGE_TEAM'],
         },
       },
     },
