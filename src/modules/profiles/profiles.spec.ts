@@ -411,6 +411,25 @@ describe('profiles — questionnaire, channels, bank', () => {
       .expect(400);
   });
 
+  it('refuses to link the same bank account to a second identity (anti-Sybil)', async () => {
+    const bank = { bank_code: '058', account_number: '0123456789', account_name: 'ADA OKAFOR' };
+    // The first promoter links the account fine.
+    await authed().post('/promoters/me/bank').set(bearer()).send(bank).expect(201);
+
+    // A second, distinct promoter tries the very same account → conflict.
+    const p2 = { ...promoter, email: 'sybil@example.com', phone_e164: '+2348012345000' };
+    const reg = await authed().post('/auth/register').send(p2).expect(201);
+    void reg;
+    const verify = await authed().post('/auth/otp/verify')
+      .send({ phone_e164: p2.phone_e164, code: otp.last(p2.phone_e164) }).expect(200);
+    const token2 = verify.body.access_token;
+
+    await authed().post('/promoters/me/bank').set({ Authorization: `Bearer ${token2}` }).send(bank).expect(409);
+
+    // The same person may still re-add their own account.
+    await authed().post('/promoters/me/bank').set(bearer()).send(bank).expect(201);
+  });
+
   it('keeps exactly one default when a second account is added', async () => {
     await authed()
       .post('/promoters/me/bank')

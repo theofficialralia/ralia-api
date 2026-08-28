@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { createCipheriv, createDecipheriv, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 /**
  * Envelope encryption for individual columns — bank account numbers today,
@@ -55,6 +55,16 @@ export class FieldEncryptionService {
       decipher.update(Buffer.from(dataB64!, 'base64url')),
       decipher.final(),
     ]).toString('utf8');
+  }
+
+  /**
+   * A deterministic, keyed fingerprint for equality/dedup — the same input always
+   * yields the same output, but it is neither reversible nor guessable without the
+   * key. Unlike {@link encrypt} (randomised IV), this is stable, so it can be
+   * indexed and compared to detect the same secret value across rows.
+   */
+  fingerprint(plaintext: string): string {
+    return createHmac('sha256', this.key).update(plaintext).digest('hex');
   }
 
   /** Constant-time compare of a candidate against a stored ciphertext's plaintext. */

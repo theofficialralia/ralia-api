@@ -328,6 +328,10 @@ model PromoterBankAccount {
   // credential (handoff §7). Never logged, never returned unmasked.
   accountNumberEnc String  @map("account_number_enc")
   accountNumberLast4 String @map("account_number_last4")
+  // Deterministic keyed HMAC of bankCode+accountNumber — lets us detect the SAME
+  // bank account backing more than one identity (anti-Sybil) without storing the
+  // number in the clear. Nullable for rows created before this column existed.
+  accountFingerprint String? @map("account_fingerprint")
   accountName      String  @map("account_name")
   isDefault        Boolean @default(false) @map("is_default")
   createdAt        DateTime @default(now()) @map("created_at")
@@ -337,6 +341,7 @@ model PromoterBankAccount {
   withdrawals Withdrawal[]
 
   @@index([userId])
+  @@index([accountFingerprint])
   @@map("promoter_bank_accounts")
 }
 

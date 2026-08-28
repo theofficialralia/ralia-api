@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PromoterBankAccount } from '@prisma/client';
 import { FieldEncryptionService } from '../../common/crypto/field-encryption.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -40,6 +40,18 @@ export class BankService {
   }
 
   async create(userId: string, dto: CreateBankAccountDto): Promise<BankAccountDto> {
+    // Anti-Sybil (one identity per payout account): the same bank account must not
+    // back more than one Ralia identity. A keyed fingerprint lets us detect this
+    // without ever comparing the number in the clear.
+    const fingerprint = this.crypto.fingerprint(`${dto.bank_code}:${dto.account_number}`);
+    const clash = await this.prisma.promoterBankAccount.findFirst({
+      where: { accountFingerprint: fingerprint, userId: { not: userId } },
+      select: { id: true },
+    });
+    if (clash) {
+      throw new ConflictException('This bank account is already linked to another Ralia account. Each account can be used by one person only.');
+    }
+
     const account = await this.prisma.$transaction(async (tx) => {
       // One default at a time.
       await tx.promoterBankAccount.updateMany({ where: { userId }, data: { isDefault: false } });
@@ -50,6 +62,7 @@ export class BankService {
           bankCode: dto.bank_code,
           accountNumberEnc: this.crypto.encrypt(dto.account_number),
           accountNumberLast4: dto.account_number.slice(-4),
+          accountFingerprint: fingerprint,
           accountName: dto.account_name,
           isDefault: true,
         },
