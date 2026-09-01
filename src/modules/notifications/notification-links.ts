@@ -14,11 +14,26 @@ export function notificationCta(type: string, data: unknown): Cta | null {
   const d = (data ?? {}) as Record<string, unknown>;
   const campaignId = typeof d.campaignId === 'string' ? d.campaignId : null;
   const assignmentId = typeof d.assignmentId === 'string' ? d.assignmentId : null;
+  // Account-level messages carry which app the recipient uses, so the link lands
+  // them in the right place. Default to the client app.
+  const appUrl = d.app === 'PROMOTER' ? PROMOTER_URL : CLIENT_URL;
   // Promoter assignment detail lives at /campaigns/:assignmentId; fall back to the
   // list when the id isn't on the payload (legacy notifications).
   const promoterAssignment = assignmentId ? `${PROMOTER_URL}/campaigns/${assignmentId}` : `${PROMOTER_URL}/campaigns`;
 
   switch (type) {
+    // ── Onboarding & account (recipient's own app) ──
+    case 'welcome.promoter':
+      return { label: 'View available campaigns', url: `${PROMOTER_URL}/offers` };
+    case 'welcome.client':
+      return { label: 'Create your first campaign', url: `${CLIENT_URL}/campaigns/new` };
+    case 'account.suspended':
+      return { label: 'Review account status', url: appUrl };
+    case 'account.reactivated':
+      return { label: 'Access your account', url: appUrl };
+    case 'payout.successful':
+      return { label: 'View payout', url: `${PROMOTER_URL}/earnings` };
+
     // ── Client-facing (client app) ──
     case 'campaign.approved':
     case 'campaign.live':
@@ -28,7 +43,7 @@ export function notificationCta(type: string, data: unknown): Cta | null {
     case 'campaign.evidence_verified':
       return campaignId ? { label: 'See the proof', url: `${CLIENT_URL}/campaigns/${campaignId}` } : null;
     case 'campaign.fulfilled':
-      return campaignId ? { label: 'View report', url: `${CLIENT_URL}/campaigns/${campaignId}` } : null;
+      return campaignId ? { label: 'View campaign report', url: `${CLIENT_URL}/campaigns/${campaignId}` } : null;
 
     // ── Promoter-facing (promoter app) ──
     case 'offer.created':

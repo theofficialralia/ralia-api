@@ -28,6 +28,7 @@ import { AllocationService } from '../allocation/allocation.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { formatNaira, toMoney } from '../ledger/money';
 import { NotificationService } from '../notifications/notification.service';
+import { templates } from '../notifications/notification-templates';
 import { ScoringService } from '../scoring/scoring.service';
 import { AuditService } from './audit.service';
 import { AdminDecisionDto, GatewayPaymentDto, RateConfigUpdateDto, ReconciliationReportDto } from './dto/admin.dto';
@@ -382,15 +383,9 @@ export class AdminService {
           data: { status: CampaignStatus.LIVE, escrowAccountId },
         });
         if (ownerId) {
+          const t = templates.campaignLive(campaignId, campaign.name);
           await this.notifications.create(
-            {
-              userId: ownerId,
-              type: 'campaign.live',
-              title: 'Campaign is live 🚀',
-              body: `"${campaign.name}" is funded and live — we're now matching it to promoters. Track delivery from your dashboard.`,
-              data: { campaignId },
-              dedupeKey: `campaign.live:${campaignId}`,
-            },
+            { userId: ownerId, type: t.type, title: t.title, body: t.body, data: t.data, dedupeKey: `campaign.live:${campaignId}` },
             tx,
           );
         }
@@ -576,15 +571,9 @@ export class AdminService {
           if (openSlots === 0 && outstandingPosts === 0) {
             await tx.campaign.update({ where: { id: campaign.id }, data: { status: CampaignStatus.FULFILLED } });
             if (ownerId) {
+              const t = templates.campaignComplete(campaign.id, campaign.name);
               await this.notifications.create(
-                {
-                  userId: ownerId,
-                  type: 'campaign.fulfilled',
-                  title: 'Campaign fulfilled 🎉',
-                  body: `"${campaign.name}" is complete — every slot delivered and passed review. Open it to see the full evidence gallery and export your report.`,
-                  data: { campaignId: campaign.id },
-                  dedupeKey: `campaign.fulfilled:${campaign.id}`,
-                },
+                { userId: ownerId, type: t.type, title: t.title, body: t.body, data: t.data, dedupeKey: `campaign.fulfilled:${campaign.id}` },
                 tx,
               );
             }
@@ -770,6 +759,12 @@ export class AdminService {
           where: { id: withdrawalId },
           data: { status: WithdrawalStatus.PAID, paidRef },
         });
+        // Tell the promoter their payout landed.
+        const t = templates.payoutSuccessful(formatNaira(withdrawal.amountMinor));
+        await this.notifications.create(
+          { userId: withdrawal.promoterId, type: t.type, title: t.title, body: t.body, dedupeKey: `payout.successful:${withdrawalId}` },
+          tx,
+        );
         await this.audit.record(
           {
             actorId: adminId,
@@ -1496,10 +1491,20 @@ export class AdminService {
     if (!org) throw new NotFoundException('No such client.');
     await this.prisma.$transaction(async (tx) => {
       await tx.clientOrg.update({ where: { id: orgId }, data: { status } });
+      const suspended = status === ClientOrgStatus.SUSPENDED;
+      // Tell the owner — but only when the status actually changes, so a repeat
+      // click doesn't re-email (and a later re-suspension can email again).
+      if (org.status !== status) {
+        const t = suspended ? templates.accountSuspended('CLIENT') : templates.accountReactivated('CLIENT');
+        await this.notifications.create(
+          { userId: org.ownerUserId, type: t.type, title: t.title, body: t.body, data: t.data },
+          tx,
+        );
+      }
       await this.audit.record(
         {
           actorId: adminId,
-          action: status === ClientOrgStatus.SUSPENDED ? 'client.deactivate' : 'client.reactivate',
+          action: suspended ? 'client.deactivate' : 'client.reactivate',
           entityType: 'client_org',
           entityId: orgId,
           before: { status: org.status },

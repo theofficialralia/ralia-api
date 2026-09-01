@@ -16,6 +16,8 @@ import {
 import * as argon2 from 'argon2';
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { NotificationService } from '../notifications/notification.service';
+import { templates } from '../notifications/notification-templates';
 import { LoginDto, RegisterDto, RegisterResponseDto, TokenPairDto } from './dto/auth.dto';
 import { GoogleAuthService } from './google-auth.service';
 import { OtpService } from './otp.service';
@@ -32,7 +34,15 @@ export class AuthService {
     private readonly otp: OtpService,
     private readonly sessions: SessionService,
     private readonly google: GoogleAuthService,
+    private readonly notifications: NotificationService,
   ) {}
+
+  /** Once-per-account welcome email, keyed to the account so it never repeats. */
+  private async sendWelcome(userId: string, roles: Role[]): Promise<void> {
+    const isClient = roles.includes(Role.CLIENT);
+    const t = isClient ? templates.welcomeClient() : templates.welcomePromoter();
+    await this.notifications.create({ userId, type: t.type, title: t.title, body: t.body, dedupeKey: `welcome:${userId}` });
+  }
 
   private get policyVersion(): string {
     return process.env.POLICY_VERSION ?? '2026-07-01';
@@ -195,6 +205,7 @@ export class AuthService {
       return user;
     });
 
+    await this.sendWelcome(created.id, created.roles.map((r) => r.role));
     return this.sessions.issue(created.id, created.roles.map((r) => r.role), userAgent);
   }
 
@@ -231,6 +242,11 @@ export class AuthService {
       },
       include: { roles: true },
     });
+
+    // First time the account becomes usable → welcome email.
+    if (user.status === UserStatus.PENDING) {
+      await this.sendWelcome(updated.id, updated.roles.map((r) => r.role));
+    }
 
     return this.sessions.issue(updated.id, updated.roles.map((r) => r.role), userAgent);
   }

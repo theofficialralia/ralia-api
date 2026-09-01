@@ -100,6 +100,21 @@ describe('NotificationService (N-1)', () => {
     expect(n.emailAttempts).toBe(1);
   });
 
+  it('renders multi-paragraph bodies as separate blocks and adds the type’s CTA', async () => {
+    const userId = await makeUser();
+    await service.create({ userId, type: 'welcome.client', title: 'Welcome to Ralia!', body: 'First para.\n\nSecond para.' });
+
+    await service.dispatchPending(new Date());
+    const sent = mailer.sent[0]!;
+    expect(sent.subject).toBe('Welcome to Ralia!');
+    // Both paragraphs made it into the HTML as distinct blocks.
+    expect(sent.html).toContain('First para.');
+    expect(sent.html).toContain('Second para.');
+    // The welcome.client CTA points at the client app's new-campaign screen.
+    expect(sent.text).toContain('Create your first campaign');
+    expect(sent.text).toMatch(/\/campaigns\/new/);
+  });
+
   it('retries on failure and gives up as FAILED after the attempt cap', async () => {
     const userId = await makeUser();
     await service.create({ userId, type: 'offer.created', title: 'New offer', body: 'Body.' });

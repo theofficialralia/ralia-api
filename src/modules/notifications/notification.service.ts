@@ -86,7 +86,8 @@ export class NotificationService {
           text: cta ? `${n.body}\n\n${cta.label}: ${cta.url}` : n.body,
           html: renderBrandedEmail({
             heading: n.title,
-            paragraphs: [n.body],
+            // Blank-line-separated paragraphs render as separate blocks.
+            paragraphs: n.body.split(/\n{2,}/),
             cta: cta ?? undefined,
             preheader: n.body.slice(0, 140),
           }),

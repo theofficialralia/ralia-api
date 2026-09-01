@@ -102,7 +102,7 @@ describe('identity — auth', () => {
   beforeEach(async () => {
     otp.sent.length = 0;
     await prisma.$executeRawUnsafe(
-      'TRUNCATE users, user_roles, otp_codes, consents, sessions, client_orgs, promoter_profiles RESTART IDENTITY CASCADE',
+      'TRUNCATE users, user_roles, otp_codes, consents, sessions, client_orgs, promoter_profiles, notifications RESTART IDENTITY CASCADE',
     );
   });
 
@@ -117,6 +117,16 @@ describe('identity — auth', () => {
       .expect(200);
     return res.body as { access_token: string; refresh_token: string };
   }
+
+  it('sends the role-appropriate welcome once the account is verified', async () => {
+    await registerAndVerify(promoter);
+    await registerAndVerify(client);
+    const promoterWelcome = await prisma.notification.findFirst({ where: { type: 'welcome.promoter' } });
+    const clientWelcome = await prisma.notification.findFirst({ where: { type: 'welcome.client' } });
+    expect(promoterWelcome).not.toBeNull();
+    expect(clientWelcome).not.toBeNull();
+    expect(promoterWelcome!.title).toBe('Welcome to Ralia!');
+  });
 
   // ── The done-when ────────────────────────────────────────
 

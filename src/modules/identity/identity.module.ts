@@ -2,6 +2,7 @@ import { Logger, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { MAILER, Mailer } from '../../common/mailer/mailer';
+import { NotificationModule } from '../notifications/notification.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { GoogleAuthService } from './google-auth.service';
@@ -59,7 +60,7 @@ function buildOtpProvider(config: ConfigService, mailer: Mailer): OtpProvider {
 }
 
 @Module({
-  imports: [JwtModule.register({})],
+  imports: [JwtModule.register({}), NotificationModule],
   controllers: [AuthController],
   providers: [
     AuthService,

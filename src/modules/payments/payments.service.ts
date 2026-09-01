@@ -4,6 +4,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { AuditService } from '../admin/audit.service';
 import { NotificationService } from '../notifications/notification.service';
+import { templates } from '../notifications/notification-templates';
 import { PaystackService } from './paystack.service';
 
 /**
@@ -164,15 +165,9 @@ export class PaymentsService {
         // admin manual-fund path's key, so a campaign is only ever announced live once.
         const org = await tx.clientOrg.findUnique({ where: { id: campaign.clientOrgId }, select: { ownerUserId: true } });
         if (org?.ownerUserId) {
+          const t = templates.campaignLive(campaignId, campaign.name);
           await this.notifications.create(
-            {
-              userId: org.ownerUserId,
-              type: 'campaign.live',
-              title: 'Campaign is live 🚀',
-              body: `"${campaign.name}" is funded and live — we're now matching it to promoters. Track delivery from your dashboard.`,
-              data: { campaignId },
-              dedupeKey: `campaign.live:${campaignId}`,
-            },
+            { userId: org.ownerUserId, type: t.type, title: t.title, body: t.body, data: t.data, dedupeKey: `campaign.live:${campaignId}` },
             tx,
           );
         }
