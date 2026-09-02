@@ -989,6 +989,58 @@ export class AdminService {
     })));
   }
 
+  /** One promoter in full (any status) — for reviewing/approving channels and
+   *  deactivating from the directory, not just the approval queue. */
+  async promoterDetail(userId: string) {
+    const p = await this.prisma.promoterProfile.findUnique({
+      where: { userId },
+      include: {
+        user: {
+          select: {
+            email: true,
+            phoneE164: true,
+            channels: {
+              orderBy: { effectiveReach: 'desc' },
+              select: {
+                id: true, platform: true, handle: true, url: true, claimedAudience: true,
+                effectiveReach: true, verificationTier: true, verifiedAt: true,
+                isGroup: true, groupMembers: true, activeParticipants: true, status: true,
+                evidenceFile: { select: { id: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!p) throw new NotFoundException('No such promoter.');
+    return {
+      user_id: p.userId,
+      full_name: p.fullName,
+      location_state: p.locationState,
+      status: p.status,
+      trust_score: p.trustScore.toNumber(),
+      roles: p.roles,
+      capability_preview: await this.scoring.computeCapability(p.userId, {}, this.prisma),
+      email: p.user.email,
+      phone_e164: p.user.phoneE164,
+      channels: p.user.channels.map((c) => ({
+        id: c.id,
+        platform: c.platform,
+        handle: c.handle,
+        url: c.url,
+        claimed_audience: c.claimedAudience,
+        effective_reach: c.effectiveReach,
+        verification_tier: c.verificationTier,
+        verified_at: c.verifiedAt?.toISOString() ?? null,
+        is_group: c.isGroup,
+        group_members: c.groupMembers,
+        active_participants: c.activeParticipants,
+        status: c.status,
+        screenshot_url: c.evidenceFile ? `/v1/files/${c.evidenceFile.id}` : null,
+      })),
+    };
+  }
+
   /**
    * Every promoter, any status — the admin directory (distinct from the
    * approval queue, which is AWAITING_APPROVAL only). A lightweight summary per
@@ -1587,7 +1639,7 @@ export class AdminService {
   async clients() {
     const orgs = await this.prisma.clientOrg.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { owner: { select: { email: true } }, _count: { select: { campaigns: true } } },
+      include: { owner: { select: { email: true, phoneE164: true } }, _count: { select: { campaigns: true } } },
     });
     const spent = await this.prisma.campaign.groupBy({
       by: ['clientOrgId'],
@@ -1599,6 +1651,7 @@ export class AdminService {
       org_id: o.id,
       name: o.name,
       email: o.owner.email,
+      phone: o.phoneWhatsapp ?? o.owner.phoneE164 ?? null,
       industry: o.industry,
       status: o.status,
       campaigns_created: o._count.campaigns,

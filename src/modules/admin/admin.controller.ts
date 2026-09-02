@@ -38,6 +38,13 @@ export class AdminController {
     return this.admin.allPromoters();
   }
 
+  @Get('promoters/:id')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'One promoter in full (channels + capability, any status)' })
+  promoterDetail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.admin.promoterDetail(id);
+  }
+
   @Get('queues/campaigns')
   @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
   @ApiOperation({ summary: 'Campaigns awaiting approval or payment' })
