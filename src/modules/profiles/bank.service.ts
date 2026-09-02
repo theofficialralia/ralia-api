@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PromoterBankAccount } from '@prisma/client';
 import { FieldEncryptionService } from '../../common/crypto/field-encryption.service';
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -40,6 +40,16 @@ export class BankService {
   }
 
   async create(userId: string, dto: CreateBankAccountDto): Promise<BankAccountDto> {
+    // Ownership check: the resolved account holder name must share a name with the
+    // promoter's own profile — you can only add a bank account in your own name.
+    // Lenient (blocks only a total mismatch) to tolerate middle names / name order.
+    const profile = await this.prisma.promoterProfile.findUnique({ where: { userId }, select: { fullName: true } });
+    if (profile?.fullName && !namesMatch(profile.fullName, dto.account_name)) {
+      throw new BadRequestException(
+        `The account holder name (“${dto.account_name}”) doesn’t match your profile name. You can only add a bank account in your own name.`,
+      );
+    }
+
     // Anti-Sybil (one identity per payout account): the same bank account must not
     // back more than one Ralia identity. A keyed fingerprint lets us detect this
     // without ever comparing the number in the clear.
@@ -86,6 +96,26 @@ export class BankService {
       accountName: account.accountName,
     };
   }
+}
+
+/** Significant name tokens (≥2 letters), lower-cased and accent-stripped. */
+function nameTokens(s: string): Set<string> {
+  return new Set(
+    s.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z\s]/g, ' ').split(/\s+/).filter((t) => t.length >= 2),
+  );
+}
+
+/**
+ * True when two names plausibly belong to the same person — they share at least
+ * one significant name token. Only a *total* mismatch is rejected, so "Ada Okafor"
+ * vs "OKAFOR ADA C" matches while "Ada Okafor" vs "John Smith" does not.
+ */
+function namesMatch(a: string, b: string): boolean {
+  const ta = nameTokens(a);
+  const tb = nameTokens(b);
+  if (ta.size === 0 || tb.size === 0) return true; // nothing to compare on → allow
+  for (const t of ta) if (tb.has(t)) return true;
+  return false;
 }
 
 function toDto(account: PromoterBankAccount): BankAccountDto {

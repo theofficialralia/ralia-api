@@ -166,10 +166,11 @@ describe('campaigns — draft, targeting, pricing', () => {
     expect(res.body.destination_url).toBeNull();
   });
 
-  it('rejects a click-driven campaign with no destination link', async () => {
-    await http().post('/campaigns').set(auth())
+  it('allows any objective with no destination link (owner uploads creative instead)', async () => {
+    const res = await http().post('/campaigns').set(auth())
       .send({ name: 'Buy Now', objective: CampaignObjective.PURCHASE, slots_total: 5 })
-      .expect(400);
+      .expect(201);
+    expect(res.body.destination_url).toBeNull();
   });
 
   // ── Lifecycle ────────────────────────────────────────────

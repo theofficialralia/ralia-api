@@ -411,6 +411,16 @@ describe('profiles — questionnaire, channels, bank', () => {
       .expect(400);
   });
 
+  it('refuses a bank account whose holder name doesn’t match the promoter', async () => {
+    await prisma.promoterProfile.update({ where: { userId }, data: { fullName: 'Ada Okafor' } });
+    // A totally different holder name is rejected…
+    await authed().post('/promoters/me/bank').set(bearer())
+      .send({ bank_code: '058', account_number: '0123456789', account_name: 'John Smith' }).expect(400);
+    // …but a shared name token (different order / middle name) is fine.
+    await authed().post('/promoters/me/bank').set(bearer())
+      .send({ bank_code: '058', account_number: '0123456789', account_name: 'OKAFOR ADA CHIOMA' }).expect(201);
+  });
+
   it('refuses to link the same bank account to a second identity (anti-Sybil)', async () => {
     const bank = { bank_code: '058', account_number: '0123456789', account_name: 'ADA OKAFOR' };
     // The first promoter links the account fine.

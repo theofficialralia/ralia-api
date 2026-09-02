@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Cadence, Campaign, CampaignObjective, CampaignStatus, Prisma, PromoterRole } from '@prisma/client';
+import { Cadence, Campaign, CampaignStatus, Prisma, PromoterRole } from '@prisma/client';
 import { buildEligibility } from '../../common/eligibility/eligibility';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
@@ -66,12 +66,9 @@ export class CampaignsService {
   async create(userId: string, dto: CreateCampaignDto): Promise<CampaignDto> {
     const orgId = await this.orgIdFor(userId);
 
-    // A destination link is where clicks go, so it's required for every click-driven
-    // objective; AWARENESS is views-only and may omit it.
-    if (dto.objective !== CampaignObjective.AWARENESS && !dto.destination_url) {
-      throw new BadRequestException('A destination link is required for this objective (only Awareness campaigns can skip it).');
-    }
-
+    // The destination link is always optional: some owners upload their creative and
+    // ask promoters to post that directly, with no link to send anyone to. When it's
+    // present it's still validated as a URL (DTO), and click tracking uses it.
     const campaign = await this.prisma.campaign.create({
       data: {
         clientOrgId: orgId,
