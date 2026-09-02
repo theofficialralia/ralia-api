@@ -94,6 +94,9 @@ export class AnalyticsService {
       acceptance_rate: acceptanceRate,
       completed,
       slots_total: campaign.slotsTotal,
+      // Success rate: verified reach delivered against the reach the client paid for.
+      target_reach: campaign.targetReach,
+      success_rate_pct: campaign.targetReach > 0 ? Math.round((views / campaign.targetReach) * 100) : 0,
       evidence: await this.evidenceGallery(campaignId),
     };
   }

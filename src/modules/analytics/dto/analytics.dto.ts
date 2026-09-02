@@ -85,6 +85,12 @@ export class CampaignAnalyticsDto {
   @ApiProperty({ example: 60 })
   slots_total!: number;
 
+  @ApiProperty({ example: 60000, description: 'Total effective reach the client paid for.' })
+  target_reach!: number;
+
+  @ApiProperty({ example: 103, description: 'Verified reach delivered ÷ target, as a percent (can exceed 100).' })
+  success_rate_pct!: number;
+
   @ApiProperty({ type: [EvidenceItemDto] })
   evidence!: EvidenceItemDto[];
 }
