@@ -211,6 +211,28 @@ export class AdminController {
     return this.admin.unverifyChannel(admin.id, id, dto.reason);
   }
 
+  @Post('channels/:id/approve')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Approve a single channel', description: 'Marks the channel ACTIVE. The promoter is activated on their first approved channel and stays reviewable so the rest can still be approved or rejected.' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  approveChannel(@CurrentUser() admin: AuthedUser, @Param('id', ParseUUIDPipe) id: string): Promise<AdminDecisionDto> {
+    return this.admin.approveChannel(admin.id, id);
+  }
+
+  @Post('channels/:id/reject')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Reject a single channel (reason required)', description: 'Marks the channel REJECTED so it is never matched on and its reach drops out of scoring.' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  rejectChannel(
+    @CurrentUser() admin: AuthedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectDto,
+  ): Promise<AdminDecisionDto> {
+    return this.admin.rejectChannel(admin.id, id, dto.reason);
+  }
+
   // ── Submissions ──────────────────────────────────────────
 
   @Post('submissions/:id/approve')
@@ -379,6 +401,24 @@ export class AdminController {
   @ApiOkResponse({ type: AdminDecisionDto })
   reactivateClient(@CurrentUser() admin: AuthedUser, @Param('id', ParseUUIDPipe) id: string): Promise<AdminDecisionDto> {
     return this.admin.setClientStatus(admin.id, id, ClientOrgStatus.ACTIVE);
+  }
+
+  @Post('promoters/:id/deactivate')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Deactivate a promoter', description: 'Excludes them from matching and blocks sign-in, reversibly.' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  deactivatePromoter(@CurrentUser() admin: AuthedUser, @Param('id', ParseUUIDPipe) id: string): Promise<AdminDecisionDto> {
+    return this.admin.setPromoterStatus(admin.id, id, false);
+  }
+
+  @Post('promoters/:id/reactivate')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Reactivate a promoter' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  reactivatePromoter(@CurrentUser() admin: AuthedUser, @Param('id', ParseUUIDPipe) id: string): Promise<AdminDecisionDto> {
+    return this.admin.setPromoterStatus(admin.id, id, true);
   }
 
   // ── Settings ─────────────────────────────────────────────

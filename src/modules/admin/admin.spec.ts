@@ -347,6 +347,39 @@ describe('admin — decisions, money and audit', () => {
     expect(p.capabilityConfirmedBy).toBe(adminId);
   });
 
+  it('approves a single channel, activating the promoter but leaving the rest reviewable', async () => {
+    const adminId = await makeAdmin();
+    const promoterId = await makePromoter(PromoterStatus.AWAITING_APPROVAL);
+    // A second, still-pending channel alongside the one makePromoter created.
+    const second = await prisma.channel.create({
+      data: { promoterId, platform: Platform.TIKTOK, claimedAudience: 5000, effectiveReach: 500, status: ChannelStatus.PENDING_REVIEW },
+    });
+    const first = await prisma.channel.findFirstOrThrow({ where: { promoterId, platform: Platform.INSTAGRAM } });
+
+    await http().post(`/admin/channels/${first.id}/approve`).set(bearer(adminId, [Role.ADMIN])).expect(200);
+
+    // Promoter is now active, but the second channel is still pending and approvable.
+    expect((await prisma.promoterProfile.findUniqueOrThrow({ where: { userId: promoterId } })).status).toBe(PromoterStatus.ACTIVE);
+    expect((await prisma.channel.findUniqueOrThrow({ where: { id: first.id } })).status).toBe(ChannelStatus.ACTIVE);
+    expect((await prisma.channel.findUniqueOrThrow({ where: { id: second.id } })).status).toBe(ChannelStatus.PENDING_REVIEW);
+
+    await http().post(`/admin/channels/${second.id}/reject`).send({ reason: 'Screenshot unreadable.' }).set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect((await prisma.channel.findUniqueOrThrow({ where: { id: second.id } })).status).toBe(ChannelStatus.REJECTED);
+  });
+
+  it('deactivates and reactivates a promoter (blocks matching + sign-in, reversibly)', async () => {
+    const adminId = await makeAdmin();
+    const promoterId = await makePromoter();
+
+    await http().post(`/admin/promoters/${promoterId}/deactivate`).set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect((await prisma.promoterProfile.findUniqueOrThrow({ where: { userId: promoterId } })).status).toBe(PromoterStatus.SUSPENDED);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: promoterId } })).status).toBe('SUSPENDED');
+
+    await http().post(`/admin/promoters/${promoterId}/reactivate`).set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect((await prisma.promoterProfile.findUniqueOrThrow({ where: { userId: promoterId } })).status).toBe(PromoterStatus.ACTIVE);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: promoterId } })).status).toBe('ACTIVE');
+  });
+
   it('lets an admin override a promoter’s capability', async () => {
     const adminId = await makeAdmin();
     const promoterId = await makePromoter();

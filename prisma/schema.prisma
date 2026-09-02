@@ -217,6 +217,9 @@ enum PromoterStatus {
   AWAITING_APPROVAL
   REJECTED
   ACTIVE
+  // Admin-deactivated: excluded from matching and blocked from signing in, but
+  // reversible (distinct from REJECTED, which is a rejected application).
+  SUSPENDED
 }
 
 // KYC gate for cash-out (§10). A promoter must be VERIFIED before a withdrawal is

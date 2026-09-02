@@ -13,6 +13,7 @@ import {
   ReconciliationStatus,
   Role,
   SlotStatus,
+  UserStatus,
   VerificationTier,
   Verdict,
   WithdrawalStatus,
@@ -1306,6 +1307,126 @@ export class AdminService {
     });
 
     return { id: channelId, status: tier, message: `Channel verified at ${tier}.` };
+  }
+
+  /**
+   * Approve a SINGLE channel (per-channel review, §7). The channel goes ACTIVE and
+   * the promoter's capability is recomputed. The promoter is activated as soon as
+   * their FIRST channel is approved — but they stay reviewable, so an admin can
+   * approve or reject the remaining channels afterwards.
+   */
+  async approveChannel(adminId: string, channelId: string): Promise<AdminDecisionDto> {
+    const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
+    if (!channel) throw new NotFoundException('No such channel.');
+    if (channel.status === ChannelStatus.ACTIVE) throw new ConflictException('That channel is already approved.');
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.channel.update({ where: { id: channelId }, data: { status: ChannelStatus.ACTIVE } });
+      await this.activatePromoterOnChannelChange(adminId, channel.promoterId, tx);
+      await this.audit.record(
+        {
+          actorId: adminId,
+          action: 'channel.approve',
+          entityType: 'channel',
+          entityId: channelId,
+          before: { status: channel.status },
+          after: { status: ChannelStatus.ACTIVE },
+        },
+        tx,
+      );
+    });
+    return { id: channelId, status: ChannelStatus.ACTIVE, message: 'Channel approved.' };
+  }
+
+  /** Reject a SINGLE channel — it is not matched on and its reach drops out of scoring. */
+  async rejectChannel(adminId: string, channelId: string, reason: string): Promise<AdminDecisionDto> {
+    const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
+    if (!channel) throw new NotFoundException('No such channel.');
+    if (channel.status === ChannelStatus.REJECTED) throw new ConflictException('That channel is already rejected.');
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.channel.update({ where: { id: channelId }, data: { status: ChannelStatus.REJECTED } });
+      // Recompute capability so a rejected channel's reach no longer counts.
+      const capabilityScores = await this.scoring.computeCapability(channel.promoterId, {}, tx);
+      await tx.promoterProfile.update({ where: { userId: channel.promoterId }, data: { capabilityScores } });
+      await this.audit.record(
+        {
+          actorId: adminId,
+          action: 'channel.reject',
+          entityType: 'channel',
+          entityId: channelId,
+          before: { status: channel.status },
+          after: { status: ChannelStatus.REJECTED },
+          reason,
+        },
+        tx,
+      );
+    });
+    return { id: channelId, status: ChannelStatus.REJECTED, message: 'Channel rejected.' };
+  }
+
+  /**
+   * After a channel is approved, recompute the promoter's capability and — if they
+   * were still awaiting approval — activate them and send the one-time welcome-to-
+   * offers notification. Idempotent: an already-ACTIVE promoter is just rescored.
+   */
+  private async activatePromoterOnChannelChange(adminId: string, promoterId: string, tx: Prisma.TransactionClient): Promise<void> {
+    const profile = await tx.promoterProfile.findUnique({ where: { userId: promoterId } });
+    if (!profile) return;
+    const now = new Date();
+    const capabilityScores = await this.scoring.computeCapability(promoterId, {}, tx);
+    const activating = profile.status === PromoterStatus.AWAITING_APPROVAL || profile.status === PromoterStatus.PROFILE_INCOMPLETE;
+    await tx.promoterProfile.update({
+      where: { userId: promoterId },
+      data: activating
+        ? { status: PromoterStatus.ACTIVE, approvedBy: adminId, approvedAt: now, capabilityScores, capabilityConfirmedBy: adminId, capabilityConfirmedAt: now }
+        : { capabilityScores },
+    });
+    if (activating) {
+      await this.notifications.create(
+        {
+          userId: promoterId,
+          type: 'promoter.approved',
+          title: "You're approved 🎉",
+          body: 'Your promoter profile is approved. Offers matched to your channels will start appearing in the app.',
+          data: {},
+          dedupeKey: `promoter.approved:${promoterId}`,
+        },
+        tx,
+      );
+    }
+  }
+
+  /**
+   * Deactivate or reactivate a promoter (mirrors client deactivate). Suspending
+   * excludes them from matching (profile → SUSPENDED) and blocks sign-in
+   * (user → SUSPENDED); reactivating restores both to ACTIVE.
+   */
+  async setPromoterStatus(adminId: string, userId: string, active: boolean): Promise<AdminDecisionDto> {
+    const profile = await this.prisma.promoterProfile.findUnique({ where: { userId } });
+    if (!profile) throw new NotFoundException('No promoter profile for that user.');
+    const nextProfile = active ? PromoterStatus.ACTIVE : PromoterStatus.SUSPENDED;
+
+    if (profile.status !== nextProfile) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.promoterProfile.update({ where: { userId }, data: { status: nextProfile } });
+        await tx.user.update({ where: { id: userId }, data: { status: active ? UserStatus.ACTIVE : UserStatus.SUSPENDED } });
+        const t = active ? templates.accountReactivated('PROMOTER') : templates.accountSuspended('PROMOTER');
+        await this.notifications.create({ userId, type: t.type, title: t.title, body: t.body, data: t.data }, tx);
+        await this.audit.record(
+          {
+            actorId: adminId,
+            action: active ? 'promoter.reactivate' : 'promoter.deactivate',
+            entityType: 'promoter_profile',
+            entityId: userId,
+            before: { status: profile.status },
+            after: { status: nextProfile },
+          },
+          tx,
+        );
+      });
+    }
+    return { id: userId, status: nextProfile, message: active ? 'Promoter reactivated.' : 'Promoter deactivated.' };
   }
 
   /** Drop a channel back to self-reported (bad or stale proof): clears verified_at and re-caps reach. */
