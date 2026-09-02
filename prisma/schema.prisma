@@ -541,6 +541,9 @@ model Campaign {
   escrowAccountId     String?           @unique @map("escrow_account_id") @db.Uuid
   slotsTotal          Int               @default(0) @map("slots_total")
   slotsFilled         Int               @default(0) @map("slots_filled")
+  // The total effective reach the client paid for (set at quote). A campaign is
+  // fulfilled once the sum of verified reach meets this — reach-driven completion.
+  targetReach         Int               @default(0) @map("target_reach")
   startsAt            DateTime?         @map("starts_at")
   endsAt              DateTime?         @map("ends_at")
   approvedBy          String?           @map("approved_by") @db.Uuid

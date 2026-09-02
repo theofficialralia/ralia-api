@@ -92,6 +92,60 @@ export class CampaignsService {
     return this.toDto(campaign);
   }
 
+  /**
+   * "Run again": clone a past campaign into a fresh DRAFT the owner can review,
+   * re-quote and pay. Copies the brief, targeting and creative (assets point at the
+   * same immutable files); resets pricing/status so it goes through approval again.
+   */
+  async duplicate(userId: string, campaignId: string): Promise<CampaignDto> {
+    const orgId = await this.orgIdFor(userId);
+    const src = await this.prisma.campaign.findFirst({
+      where: { id: campaignId, clientOrgId: orgId },
+      include: { targeting: true, assets: true },
+    });
+    if (!src) throw new NotFoundException('No such campaign.');
+
+    const t = src.targeting;
+    const copy = await this.prisma.campaign.create({
+      data: {
+        clientOrgId: orgId,
+        name: `${src.name} (copy)`,
+        objective: src.objective,
+        description: src.description,
+        promoterInstructions: src.promoterInstructions,
+        destinationUrl: src.destinationUrl,
+        status: CampaignStatus.DRAFT,
+        budgetMinor: 0n,
+        slotsTotal: src.slotsTotal,
+        cadence: src.cadence,
+        postsRequired: src.postsRequired,
+        roleConfig: src.roleConfig ?? undefined,
+        // Dates are relative to a run — start fresh rather than copying old ones.
+        startsAt: null,
+        endsAt: null,
+        targeting: {
+          create: t
+            ? {
+                states: t.states, lgas: t.lgas, ageMin: t.ageMin, ageMax: t.ageMax,
+                genders: t.genders, languages: t.languages, categories: t.categories,
+                platforms: t.platforms, roles: t.roles, minEffectiveReach: t.minEffectiveReach,
+              }
+            : { states: [], lgas: [], genders: [], languages: [], categories: [], platforms: [], roles: [] },
+        },
+        assets: {
+          create: src.assets.map((a) => ({
+            kind: a.kind,
+            fileId: a.fileId,
+            captionText: a.captionText,
+            orderIndex: a.orderIndex,
+          })),
+        },
+      },
+    });
+
+    return this.toDto(copy);
+  }
+
   async get(userId: string, campaignId: string): Promise<CampaignDto> {
     const campaign = await this.ownedCampaign(userId, campaignId);
     // Delivery proof for the client: human clicks driven across the campaign.
@@ -292,6 +346,8 @@ export class CampaignsService {
           priceMinor: totalPrice,
           budgetMinor: totalPrice,
           slotsTotal,
+          // The reach the client is paying for — the fulfilment target.
+          targetReach: slotsTotal * reachPerSlot * posts,
           quotedAt: new Date(),
         },
       }),

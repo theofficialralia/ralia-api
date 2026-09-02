@@ -57,6 +57,13 @@ export class CampaignsController {
     return this.campaigns.create(user.id, dto);
   }
 
+  @Post(':id/duplicate')
+  @ApiOperation({ summary: 'Run again', description: 'Clone a past campaign (brief, targeting, creative) into a new draft to review and re-run.' })
+  @ApiCreatedResponse({ type: CampaignDto })
+  duplicate(@CurrentUser() user: AuthedUser, @Param('id', ParseUUIDPipe) id: string): Promise<CampaignDto> {
+    return this.campaigns.duplicate(user.id, id);
+  }
+
   @Get()
   @ApiOperation({ summary: 'List my campaigns' })
   @ApiOkResponse({ type: [CampaignDto] })

@@ -279,6 +279,20 @@ describe('admin — decisions, money and audit', () => {
     expect(fulfilled?.body).toMatch(/complete/i);
   });
 
+  it('fulfils a campaign early once verified reach meets the target, even with slots still open', async () => {
+    const { submissionId, campaignId, adminId } = await makePendingSubmission();
+    // Target the client paid for is low, and there is another slot still open — so the
+    // slot-based path would NOT complete, but the reach target is met on this approval.
+    await prisma.campaign.update({ where: { id: campaignId }, data: { targetReach: 500 } });
+    await prisma.campaignSlot.create({ data: { campaignId, role: PromoterRole.DISTRIBUTOR, unitPriceMinor: 1n, status: SlotStatus.OPEN } });
+
+    await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: 800 }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+
+    const done = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+    expect(done.status).toBe(CampaignStatus.FULFILLED); // 800 verified ≥ 500 target
+    expect(await prisma.campaignSlot.count({ where: { campaignId, status: SlotStatus.OPEN } })).toBe(1); // slot stayed open
+  });
+
   it('a delivery below the threshold is refused and moves no money', async () => {
     const { submissionId, promoterId, adminId } = await makePendingSubmission();
 

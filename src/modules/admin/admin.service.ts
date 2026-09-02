@@ -569,7 +569,16 @@ export class AdminService {
               status: { in: [DeliverySlotStatus.PENDING, DeliverySlotStatus.SUBMITTED] },
             },
           });
-          if (openSlots === 0 && outstandingPosts === 0) {
+          // Reach-driven completion (product decision): a campaign is complete once the
+          // sum of admin-verified reach meets the target the client paid for — even if
+          // some slots never filled. Delivery-complete (all slots landed) still counts.
+          const verifiedAgg = await tx.submission.aggregate({
+            where: { assignment: { campaignId: campaign.id }, verdict: Verdict.APPROVED },
+            _sum: { verifiedReach: true },
+          });
+          const totalVerified = verifiedAgg._sum.verifiedReach ?? 0;
+          const reachMet = campaign.targetReach > 0 && totalVerified >= campaign.targetReach;
+          if ((openSlots === 0 && outstandingPosts === 0) || reachMet) {
             await tx.campaign.update({ where: { id: campaign.id }, data: { status: CampaignStatus.FULFILLED } });
             if (ownerId) {
               const t = templates.campaignComplete(campaign.id, campaign.name);
