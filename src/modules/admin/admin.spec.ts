@@ -165,8 +165,8 @@ describe('admin — decisions, money and audit', () => {
 
     await http().post(`/admin/campaigns/${campaignId}/fund`).set(bearer(adminId, [Role.ADMIN])).set(key())
       .send({ amount_minor: Number(UNIT_PRICE) }).expect(200);
-
-    // Funding takes it live and notifies the campaign owner (N-5).
+    // Payment funds escrow → review; approval takes it live and emits campaign.live.
+    await http().post(`/admin/campaigns/${campaignId}/approve`).set(bearer(adminId, [Role.ADMIN])).expect(200);
     const liveNote = await prisma.notification.findFirstOrThrow({ where: { type: 'campaign.live' } });
     expect(liveNote.body).toMatch(/live/i);
 
@@ -554,15 +554,21 @@ describe('admin — decisions, money and audit', () => {
     expect(campaign.status).toBe(CampaignStatus.CONFIRMING_PAYMENT); // unchanged
   });
 
-  it('funding makes the campaign LIVE', async () => {
+  it('funding sends the campaign to review, then approval makes it LIVE', async () => {
     const adminId = await makeAdmin();
     const campaignId = await makeApprovedCampaign(1);
     await http().post(`/admin/campaigns/${campaignId}/fund`).set(bearer(adminId, [Role.ADMIN])).set(key())
       .send({ amount_minor: Number(UNIT_PRICE) }).expect(200);
 
-    const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-    expect(campaign.status).toBe(CampaignStatus.LIVE);
+    // Payment (bank transfer recorded) funds escrow and queues it for review.
+    let campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+    expect(campaign.status).toBe(CampaignStatus.PENDING_APPROVAL);
     expect(campaign.escrowAccountId).not.toBeNull();
+
+    // Approval is the final gate → LIVE.
+    await http().post(`/admin/campaigns/${campaignId}/approve`).set(bearer(adminId, [Role.ADMIN])).expect(200);
+    campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+    expect(campaign.status).toBe(CampaignStatus.LIVE);
   });
 
   // ── Rejections require a reason ──────────────────────────
@@ -652,6 +658,7 @@ describe('admin — decisions, money and audit', () => {
     const campaignId = await makeApprovedCampaign(1);
     await http().post(`/admin/campaigns/${campaignId}/fund`).set(bearer(adminId, [Role.ADMIN])).set(key())
       .send({ amount_minor: Number(UNIT_PRICE) }).expect(200);
+    await http().post(`/admin/campaigns/${campaignId}/approve`).set(bearer(adminId, [Role.ADMIN])).expect(200);
     const channel = await prisma.channel.findFirstOrThrow({ where: { promoterId } });
     const slot = await prisma.campaignSlot.findFirstOrThrow({ where: { campaignId } });
     const offer = await prisma.offer.create({

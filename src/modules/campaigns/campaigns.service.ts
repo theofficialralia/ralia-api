@@ -447,14 +447,19 @@ export class CampaignsService {
   }
 
   /** Submit a quoted campaign for admin approval. */
+  /**
+   * Resubmit a "needs changes" campaign for review. Payment happens first (pay →
+   * PENDING_APPROVAL), so this is only for a campaign an admin sent back (REJECTED):
+   * its escrow is still held, so the owner fixes it and resubmits without re-paying.
+   */
   async submitForApproval(userId: string, campaignId: string): Promise<CampaignDto> {
     const campaign = await this.ownedCampaign(userId, campaignId);
-    if (campaign.status !== CampaignStatus.QUOTED) {
-      throw new BadRequestException('Only a quoted campaign can be submitted for approval.');
+    if (campaign.status !== CampaignStatus.REJECTED) {
+      throw new BadRequestException('Only a campaign that was sent back for changes can be resubmitted for review.');
     }
     const updated = await this.prisma.campaign.update({
       where: { id: campaignId },
-      data: { status: CampaignStatus.PENDING_APPROVAL },
+      data: { status: CampaignStatus.PENDING_APPROVAL, rejectReason: null },
     });
     return this.toDto(updated);
   }

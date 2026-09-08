@@ -94,17 +94,13 @@ export class PaymentsService {
       return { status: campaign.status, message: 'Payment already recorded.' };
     }
 
-    // Admin approval is mandatory before any money moves: a campaign is fundable
-    // ONLY once an admin has approved it (PENDING_APPROVAL → CONFIRMING_PAYMENT).
-    // Paying straight from QUOTED is no longer allowed — nothing goes live without
-    // a human review (e.g. against prohibited/contraband content).
-    const fundable: CampaignStatus[] = [CampaignStatus.CONFIRMING_PAYMENT];
+    // Order of operations (§approval): the client PAYS FIRST, which funds escrow and
+    // sends the campaign to admin review (PENDING_APPROVAL). An admin then approves it
+    // LIVE or rejects it (refunding). So a quoted campaign is what's fundable here;
+    // paying never takes anything live on its own.
+    const fundable: CampaignStatus[] = [CampaignStatus.QUOTED, CampaignStatus.CONFIRMING_PAYMENT];
     if (!fundable.includes(campaign.status)) {
-      const hint =
-        campaign.status === CampaignStatus.QUOTED || campaign.status === CampaignStatus.PENDING_APPROVAL
-          ? ' It must be approved by an admin before payment.'
-          : '';
-      throw new ConflictException(`A ${campaign.status} campaign cannot be funded.${hint}`);
+      throw new ConflictException(`A ${campaign.status} campaign cannot be funded.`);
     }
 
     // Confirm the charge with Paystack before any money moves.
@@ -128,14 +124,14 @@ export class PaymentsService {
       actorId: userId,
     });
 
-    // Only the first funding of this reference takes the campaign live and opens
-    // the reconciliation row — a concurrent replay must not re-audit or collide
-    // on the unique reference.
+    // Only the first funding of this reference funds escrow, sends the campaign to
+    // review and opens the reconciliation row — a concurrent replay must not re-audit
+    // or collide on the unique reference. It does NOT go live: an admin decides that.
     if (!replayed) {
       await this.prisma.$transaction(async (tx) => {
         await tx.campaign.update({
           where: { id: campaignId },
-          data: { status: CampaignStatus.LIVE, escrowAccountId },
+          data: { status: CampaignStatus.PENDING_APPROVAL, escrowAccountId },
         });
         // Open a reconciliation row: the charge is confirmed and escrow funded,
         // but settlement is confirmed later by finance (§10).
@@ -155,25 +151,15 @@ export class PaymentsService {
             entityType: 'campaign',
             entityId: campaignId,
             before: { status: campaign.status },
-            after: { status: CampaignStatus.LIVE, amountMinor: campaign.priceMinor, reference },
+            after: { status: CampaignStatus.PENDING_APPROVAL, amountMinor: campaign.priceMinor, reference },
             reason: `Paystack ${reference}`,
           },
           tx,
         );
-
-        // Tell the owner their campaign is live (§notifications). dedupeKey shares the
-        // admin manual-fund path's key, so a campaign is only ever announced live once.
-        const org = await tx.clientOrg.findUnique({ where: { id: campaign.clientOrgId }, select: { ownerUserId: true } });
-        if (org?.ownerUserId) {
-          const t = templates.campaignLive(campaignId, campaign.name);
-          await this.notifications.create(
-            { userId: org.ownerUserId, type: t.type, title: t.title, body: t.body, data: t.data, dedupeKey: `campaign.live:${campaignId}` },
-            tx,
-          );
-        }
+        // No "campaign is live" email here — that fires when an admin approves it.
       });
     }
 
-    return { status: CampaignStatus.LIVE, message: 'Payment confirmed; your campaign is live.' };
+    return { status: CampaignStatus.PENDING_APPROVAL, message: 'Payment received — your campaign is now under review.' };
   }
 }

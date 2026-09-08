@@ -251,19 +251,14 @@ export class AdminService {
     await this.prisma.$transaction(async (tx) => {
       await tx.campaign.update({
         where: { id: campaignId },
-        // Approved, now awaiting the client's transfer — funding flips it LIVE.
-        data: { status: CampaignStatus.CONFIRMING_PAYMENT, approvedBy: adminId, approvedAt: new Date() },
+        // The client already paid (escrow is funded) — approval is the final gate,
+        // so approving takes it LIVE and matching begins.
+        data: { status: CampaignStatus.LIVE, approvedBy: adminId, approvedAt: new Date() },
       });
       if (ownerId) {
+        const t = templates.campaignLive(campaignId, campaign.name);
         await this.notifications.create(
-          {
-            userId: ownerId,
-            type: 'campaign.approved',
-            title: 'Campaign approved',
-            body: `"${campaign.name}" is approved. Fund it with the quoted amount to take it live and start matching promoters.`,
-            data: { campaignId },
-            dedupeKey: `campaign.approved:${campaignId}`,
-          },
+          { userId: ownerId, type: t.type, title: t.title, body: t.body, data: t.data, dedupeKey: `campaign.live:${campaignId}` },
           tx,
         );
       }
@@ -274,13 +269,13 @@ export class AdminService {
           entityType: 'campaign',
           entityId: campaignId,
           before: { status: campaign.status },
-          after: { status: CampaignStatus.CONFIRMING_PAYMENT },
+          after: { status: CampaignStatus.LIVE },
         },
         tx,
       );
     });
 
-    return { id: campaignId, status: CampaignStatus.CONFIRMING_PAYMENT, message: 'Campaign approved; awaiting payment.' };
+    return { id: campaignId, status: CampaignStatus.LIVE, message: 'Campaign approved; it is now live.' };
   }
 
   async rejectCampaign(adminId: string, campaignId: string, reason: string, terminal = false): Promise<AdminDecisionDto> {
@@ -290,10 +285,25 @@ export class AdminService {
       throw new ConflictException(`A ${campaign.status} campaign is not awaiting approval.`);
     }
 
-    // Two-type reject: "temporary" (default) → REJECTED, the owner can edit and
-    // resubmit; "entirely"/terminal → CANCELLED, not resubmittable.
+    // The client has already paid (escrow is funded), so a reject decides the money:
+    //   • terminal ("reject entirely")  → refund the escrow to the client, CANCELLED.
+    //   • non-terminal ("needs changes") → hold the escrow, REJECTED; the owner edits
+    //     and resubmits for review without paying again.
     const nextStatus = terminal ? CampaignStatus.CANCELLED : CampaignStatus.REJECTED;
     const ownerId = await this.campaignOwnerId(campaign.clientOrgId);
+
+    if (terminal && campaign.escrowAccountId && campaign.priceMinor) {
+      const clientWalletAccountId = await this.ledger.getOrCreateAccount(AccountKind.CLIENT_WALLET, campaign.clientOrgId);
+      await this.ledger.refundCampaign({
+        campaignId,
+        escrowAccountId: campaign.escrowAccountId,
+        clientWalletAccountId,
+        amountMinor: campaign.priceMinor,
+        idempotencyKey: `refund:${campaignId}`,
+        actorId: adminId,
+      });
+    }
+
     await this.prisma.$transaction(async (tx) => {
       await tx.campaign.update({ where: { id: campaignId }, data: { status: nextStatus, rejectReason: reason } });
       if (ownerId) {
@@ -301,10 +311,10 @@ export class AdminService {
           {
             userId: ownerId,
             type: 'campaign.rejected',
-            title: terminal ? 'Campaign rejected' : 'Campaign needs changes',
+            title: terminal ? 'Campaign rejected — refunded' : 'Campaign needs changes',
             body: terminal
-              ? `"${campaign.name}" was rejected and can't be resubmitted: ${reason}`
-              : `"${campaign.name}" wasn't approved: ${reason} Edit and resubmit it for review.`,
+              ? `"${campaign.name}" was rejected: ${reason} Your payment has been refunded to your Ralia balance.`
+              : `"${campaign.name}" wasn't approved: ${reason} Edit and resubmit it for review — no need to pay again.`,
             data: { campaignId, reason, terminal },
             dedupeKey: `campaign.rejected:${campaignId}`,
           },
@@ -318,7 +328,7 @@ export class AdminService {
           entityType: 'campaign',
           entityId: campaignId,
           before: { status: campaign.status },
-          after: { status: CampaignStatus.REJECTED },
+          after: { status: nextStatus, refunded: terminal },
           reason,
         },
         tx,
@@ -352,7 +362,11 @@ export class AdminService {
       return { id: campaignId, status: campaign.status, message: 'Already recorded.' };
     }
 
-    if (campaign.status !== CampaignStatus.CONFIRMING_PAYMENT) {
+    // Recording a bank transfer is the same as a card payment: it funds escrow and
+    // sends the campaign to review (an admin still approves it live). So a quoted
+    // campaign is what's fundable.
+    const fundable: CampaignStatus[] = [CampaignStatus.QUOTED, CampaignStatus.CONFIRMING_PAYMENT];
+    if (!fundable.includes(campaign.status)) {
       throw new ConflictException(`A ${campaign.status} campaign is not awaiting funding.`);
     }
     if (campaign.priceMinor === null) {
@@ -381,15 +395,10 @@ export class AdminService {
       await this.prisma.$transaction(async (tx) => {
         await tx.campaign.update({
           where: { id: campaignId },
-          data: { status: CampaignStatus.LIVE, escrowAccountId },
+          // Payment recorded → into review, not live. Approval flips it live.
+          data: { status: CampaignStatus.PENDING_APPROVAL, escrowAccountId },
         });
-        if (ownerId) {
-          const t = templates.campaignLive(campaignId, campaign.name);
-          await this.notifications.create(
-            { userId: ownerId, type: t.type, title: t.title, body: t.body, data: t.data, dedupeKey: `campaign.live:${campaignId}` },
-            tx,
-          );
-        }
+        void ownerId; // no live email here — approval sends it
         await this.audit.record(
           {
             actorId: adminId,
@@ -397,7 +406,7 @@ export class AdminService {
             entityType: 'campaign',
             entityId: campaignId,
             before: { status: campaign.status, escrowAccountId: campaign.escrowAccountId },
-            after: { status: CampaignStatus.LIVE, escrowAccountId, amountMinor },
+            after: { status: CampaignStatus.PENDING_APPROVAL, escrowAccountId, amountMinor },
             reason: reference,
           },
           tx,
@@ -405,7 +414,7 @@ export class AdminService {
       });
     }
 
-    return { id: campaignId, status: CampaignStatus.LIVE, message: replayed ? 'Already recorded.' : 'Funding recorded; campaign is live.' };
+    return { id: campaignId, status: CampaignStatus.PENDING_APPROVAL, message: replayed ? 'Already recorded.' : 'Funding recorded; campaign is now under review.' };
   }
 
   // ── Submissions ──────────────────────────────────────────

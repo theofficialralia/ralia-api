@@ -303,20 +303,16 @@ describe('campaigns — draft, targeting, pricing', () => {
     await http().post(`/campaigns/${id}/quote`).set(auth()).send({ price_minor: 1_000_000 }).expect(400);
   });
 
-  it('moves a quoted campaign to PENDING_APPROVAL on submit', async () => {
+  it('resubmit is only for a sent-back (REJECTED) campaign; a quoted one goes to review by paying', async () => {
     const id = await createDraft();
-    await http().put(`/campaigns/${id}/targeting`).set(auth()).send({ min_effective_reach: 1000 }).expect(200);
     await http().post(`/campaigns/${id}/quote`).set(auth()).expect(201);
+    // Payment is the path to review now — a quoted campaign can't be "submitted".
+    await http().post(`/campaigns/${id}/submit`).set(auth()).expect(400);
+
+    // A campaign an admin sent back for changes can be resubmitted (money is held).
+    await prisma.campaign.update({ where: { id }, data: { status: CampaignStatus.REJECTED } });
     const res = await http().post(`/campaigns/${id}/submit`).set(auth()).expect(201);
     expect(res.body.status).toBe(CampaignStatus.PENDING_APPROVAL);
-
-    // A pending campaign is no longer editable.
-    await http().patch(`/campaigns/${id}`).set(auth()).send({ name: 'x' }).expect(400);
-  });
-
-  it('cannot submit a campaign that was never quoted', async () => {
-    const id = await createDraft();
-    await http().post(`/campaigns/${id}/submit`).set(auth()).expect(400);
   });
 
   // ── Estimate reflects targeting ──────────────────────────
