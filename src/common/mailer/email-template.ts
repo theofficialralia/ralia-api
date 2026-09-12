@@ -1,5 +1,5 @@
 /**
- * The one branded HTML shell every Ralia email renders through — OTP codes and
+ * The one branded HTML shell every Ralia email renders through - OTP codes and
  * notifications alike. Table-based with inline styles (the only thing email clients
  * reliably honour), no external assets, ~560px card, brand header + support footer.
  */

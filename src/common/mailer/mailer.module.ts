@@ -46,7 +46,7 @@ import { LogMailer, SmtpMailer } from './smtp.mailer';
           : transport === 'smtp' ? 'MAIL_TRANSPORT=smtp but SMTP_HOST is missing'
           : 'MAIL_TRANSPORT is not set';
         const env = config.get<string>('NODE_ENV');
-        const msg = `Email is NOT being delivered (${misconfigured}) — using a log-only mailer. Verification and notification emails will NOT arrive.`;
+        const msg = `Email is NOT being delivered (${misconfigured}) - using a log-only mailer. Verification and notification emails will NOT arrive.`;
         if (env && env !== 'development' && env !== 'test') logger.error(`⚠️  ${msg} Set MAIL_TRANSPORT + RESEND_API_KEY (and verify your sending domain) in this environment.`);
         else logger.warn(msg);
         return new LogMailer();

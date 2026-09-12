@@ -25,7 +25,7 @@ export const templates = {
     title: 'Welcome to Ralia!',
     body:
       'My name is Victory Esele, and I am the Head of Ralia. We built Ralia because great businesses like yours deserve to reach the right people.\n\n' +
-      'Ralia gives you a simple way to get people to promote your campaign — talking about your business, creating content for your product, sharing it, generating engagement, and completing assigned tasks both online and on the ground.\n\n' +
+      'Ralia gives you a simple way to get people to promote your campaign - talking about your business, creating content for your product, sharing it, generating engagement, and completing assigned tasks both online and on the ground.\n\n' +
       'Your account is ready.\n\n' +
       'With best regards,\nVictory Esele\nHead of Ralia',
   }),

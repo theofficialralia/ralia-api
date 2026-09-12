@@ -6,7 +6,7 @@ import { NotificationService } from './notification.service';
 
 @Module({
   // MailerModule is @Global, but importing it here makes MAILER resolvable wherever
-  // NotificationModule is used — including partial test graphs that never import it.
+  // NotificationModule is used - including partial test graphs that never import it.
   imports: [MailerModule],
   controllers: [NotificationController],
   providers: [NotificationService, NotificationScheduler],

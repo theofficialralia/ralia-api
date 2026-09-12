@@ -8,7 +8,7 @@ export type MailMessage = {
 };
 
 /**
- * Pluggable outbound email — same shape in every environment. SMTP (mailpit) in dev,
+ * Pluggable outbound email - same shape in every environment. SMTP (mailpit) in dev,
  * a transactional provider in prod, a log/no-op when nothing is configured. Nothing
  * above this interface knows which is bound. A failed send throws so the dispatch
  * sweep can retry.

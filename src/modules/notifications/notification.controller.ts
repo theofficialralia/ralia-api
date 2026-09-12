@@ -6,7 +6,7 @@ import { NotificationListDto } from './dto/notification.dto';
 import { NotificationService } from './notification.service';
 
 /**
- * The signed-in user's own notification feed. No @Roles — every authenticated user
+ * The signed-in user's own notification feed. No @Roles - every authenticated user
  * (promoter, client, admin) reads their own; every query is scoped to their id, so no
  * one can see or touch another's.
  */

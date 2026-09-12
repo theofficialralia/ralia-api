@@ -67,7 +67,7 @@ describe('NotificationService (N-1)', () => {
     expect(n.readAt).toBeNull();
   });
 
-  it('is idempotent on dedupeKey — a second create is silently ignored', async () => {
+  it('is idempotent on dedupeKey - a second create is silently ignored', async () => {
     const userId = await makeUser();
     const key = `offer.created:${userId}:abc`;
     await service.create({ userId, type: 'offer.created', title: 'A', body: 'A', dedupeKey: key });
@@ -166,7 +166,7 @@ describe('NotificationService (N-1)', () => {
       const aNote = await prisma.notification.findFirstOrThrow({ where: { userId: a } });
       const bNote = await prisma.notification.findFirstOrThrow({ where: { userId: b } });
 
-      // A tries to mark B's notification — the userId scope means nothing changes.
+      // A tries to mark B's notification - the userId scope means nothing changes.
       await service.markRead(a, bNote.id, new Date());
       expect((await prisma.notification.findUniqueOrThrow({ where: { id: bNote.id } })).readAt).toBeNull();
 

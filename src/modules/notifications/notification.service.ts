@@ -5,7 +5,7 @@ import { renderBrandedEmail } from '../../common/mailer/email-template';
 import { notificationCta } from './notification-links';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
-/** A Prisma client or an interactive-transaction client — mirrors LedgerService. */
+/** A Prisma client or an interactive-transaction client - mirrors LedgerService. */
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
 export type NotifyInput = {
@@ -24,7 +24,7 @@ export type NotifyInput = {
 const MAX_ATTEMPTS = 3;
 
 /**
- * Durable per-user notifications (N-1). `create` persists a record — optionally inside
+ * Durable per-user notifications (N-1). `create` persists a record - optionally inside
  * the caller's transaction, so a notification can't be lost if the event that spawned
  * it commits. `dispatchPending` is the sweep that emails the PENDING backlog, decoupled
  * from the request path so a slow or down SMTP never blocks or fails a core action.
@@ -135,7 +135,7 @@ export class NotificationService {
     return this.prisma.notification.count({ where: { userId, readAt: null } });
   }
 
-  /** Mark one notification read — scoped to the owner so no one can touch another's. */
+  /** Mark one notification read - scoped to the owner so no one can touch another's. */
   async markRead(userId: string, id: string, now: Date): Promise<void> {
     await this.prisma.notification.updateMany({
       where: { id, userId, readAt: null },
