@@ -297,6 +297,42 @@ export class AuthService {
     await this.sessions.revokeAllForUser(userId);
   }
 
+  /**
+   * Start a password reset: issue a one-time code and deliver it to the account's
+   * email (and any WhatsApp on file). Always resolves the same way whether or not the
+   * email is registered — an unauthenticated caller must never be able to enumerate
+   * accounts. Reuses the existing OTP machinery with the PASSWORD_RESET purpose.
+   */
+  async forgotPassword(email: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user) return; // silent — no account enumeration
+    await this.otp.issue(user.id, user.phoneE164 ?? '', OtpPurpose.PASSWORD_RESET);
+  }
+
+  /**
+   * Complete a password reset with the emailed code. Sets the new password and
+   * revokes every session, so anyone holding the old password (or a live session) is
+   * signed out. A successful reset also proves control of the inbox, so an account
+   * that never finished phone verification is marked verified here rather than being
+   * left unable to log in. The error is generic so it can't confirm which emails exist.
+   */
+  async resetPassword(email: string, code: string, newPassword: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    const ok = user ? await this.otp.verify(user.id, OtpPurpose.PASSWORD_RESET, code) : false;
+    if (!user || !ok) throw new BadRequestException('That code is not valid or has expired. Request a new one.');
+
+    const passwordHash = await argon2.hash(newPassword);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        phoneVerifiedAt: user.phoneVerifiedAt ?? new Date(),
+        status: user.status === UserStatus.PENDING ? UserStatus.ACTIVE : user.status,
+      },
+    });
+    await this.sessions.revokeAllForUser(user.id);
+  }
+
   async me(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },

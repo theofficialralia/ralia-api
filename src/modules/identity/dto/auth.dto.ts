@@ -142,6 +142,31 @@ export class ChangePasswordDto {
   new_password!: string;
 }
 
+export class ForgotPasswordDto {
+  @ApiProperty({ example: 'ada@example.com', description: 'The account email. We send a reset code to it (and any WhatsApp on file).' })
+  @IsEmail()
+  @MaxLength(254)
+  email!: string;
+}
+
+export class ResetPasswordDto {
+  @ApiProperty({ example: 'ada@example.com' })
+  @IsEmail()
+  @MaxLength(254)
+  email!: string;
+
+  @ApiProperty({ example: '123456', minLength: 6, maxLength: 6, description: 'The 6-digit code from the reset email.' })
+  @IsString()
+  @Length(6, 6)
+  code!: string;
+
+  @ApiProperty({ minLength: 10, description: 'The new password.' })
+  @IsString()
+  @MinLength(10)
+  @MaxLength(200)
+  new_password!: string;
+}
+
 // ── Responses ────────────────────────────────────────────────
 
 export class RegisterResponseDto {

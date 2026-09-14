@@ -17,8 +17,10 @@ import { AuthService } from './auth.service';
 import {
   AcceptedDto,
   ChangePasswordDto,
+  ForgotPasswordDto,
   GoogleSignInDto,
   LoginDto,
+  ResetPasswordDto,
   MeDto,
   OtpRequestDto,
   OtpVerifyDto,
@@ -119,6 +121,33 @@ export class AuthController {
   @ApiOperation({ summary: 'Revoke a refresh token' })
   async logout(@Body() dto: RefreshDto): Promise<void> {
     await this.sessions.revoke(dto.refresh_token);
+  }
+
+  @Public()
+  @Post('password/forgot')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Request a password-reset code',
+    description:
+      'Emails a 6-digit reset code (and sends it to any WhatsApp on file). Always returns 202 whether or not the email is registered, so it cannot be used to enumerate accounts.',
+  })
+  @ApiOkResponse({ type: AcceptedDto })
+  async forgotPassword(@Body() dto: ForgotPasswordDto): Promise<AcceptedDto> {
+    await this.auth.forgotPassword(dto.email);
+    return { accepted: true, message: 'If that email is registered, a reset code has been sent.' };
+  }
+
+  @Public()
+  @Post('password/reset')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Reset a password with the emailed code',
+    description: 'Verifies the reset code and sets the new password. Revokes every existing session on success.',
+  })
+  async resetPassword(@Body() dto: ResetPasswordDto): Promise<void> {
+    await this.auth.resetPassword(dto.email, dto.code, dto.new_password);
   }
 
   @Get('me')

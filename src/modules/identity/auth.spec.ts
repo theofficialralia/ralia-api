@@ -388,6 +388,64 @@ describe('identity — auth', () => {
     await http().post('/auth/change-password').send({ current_password: 'x', new_password: 'a long enough one' }).expect(401);
   });
 
+  // ── Forgot / reset password (OTP-based) ──────────────────
+
+  /** The most recent PASSWORD_RESET code sent to a phone. */
+  const resetCode = (phone: string) => {
+    const found = [...otp.sent].reverse().find((s) => s.purpose === OtpPurpose.PASSWORD_RESET && s.to.phone === phone);
+    if (!found) throw new Error(`No reset code was sent to ${phone}`);
+    return found.code;
+  };
+
+  it('resets a forgotten password with the emailed code and logs in with the new one', async () => {
+    await registerAndVerify(promoter);
+
+    await http().post('/auth/password/forgot').send({ email: promoter.email }).expect(202);
+    const code = resetCode(promoter.phone_e164);
+    // The code is delivered to the account email, not just the phone.
+    const reset = [...otp.sent].reverse().find((s) => s.purpose === OtpPurpose.PASSWORD_RESET)!;
+    expect(reset.to.email).toBe(promoter.email);
+
+    await http().post('/auth/password/reset').send({ email: promoter.email, code, new_password: 'a brand new passphrase' }).expect(204);
+
+    await http().post('/auth/login').send({ email: promoter.email, password: promoter.password }).expect(401);
+    await http().post('/auth/login').send({ email: promoter.email, password: 'a brand new passphrase' }).expect(200);
+  });
+
+  it('does not reveal whether an email is registered', async () => {
+    const res = await http().post('/auth/password/forgot').send({ email: 'nobody@example.com' }).expect(202);
+    expect(res.body.accepted).toBe(true);
+    expect(otp.sent).toHaveLength(0); // nothing issued for an unknown email
+  });
+
+  it('rejects a wrong or already-used reset code', async () => {
+    await registerAndVerify(promoter);
+    await http().post('/auth/password/forgot').send({ email: promoter.email }).expect(202);
+    const code = resetCode(promoter.phone_e164);
+
+    await http().post('/auth/password/reset').send({ email: promoter.email, code: '000000', new_password: 'a brand new passphrase' }).expect(400);
+    // The real code still works after a wrong guess…
+    await http().post('/auth/password/reset').send({ email: promoter.email, code, new_password: 'a brand new passphrase' }).expect(204);
+    // …but not a second time (consumed).
+    await http().post('/auth/password/reset').send({ email: promoter.email, code, new_password: 'yet another passphrase' }).expect(400);
+  });
+
+  it('rejects a too-short new password', async () => {
+    await registerAndVerify(promoter);
+    await http().post('/auth/password/forgot').send({ email: promoter.email }).expect(202);
+    const code = resetCode(promoter.phone_e164);
+    await http().post('/auth/password/reset').send({ email: promoter.email, code, new_password: 'short' }).expect(400);
+  });
+
+  it('a reset revokes every existing session', async () => {
+    const tokens = await registerAndVerify(promoter);
+    await http().post('/auth/password/forgot').send({ email: promoter.email }).expect(202);
+    const code = resetCode(promoter.phone_e164);
+    await http().post('/auth/password/reset').send({ email: promoter.email, code, new_password: 'a brand new passphrase' }).expect(204);
+    // The refresh token issued before the reset is now dead.
+    await http().post('/auth/refresh').send({ refresh_token: tokens.refresh_token }).expect(401);
+  });
+
   // ── Sign in with Google ──────────────────────────────────
 
   it('creates an ACTIVE, phone-less promoter on first Google sign-in and returns tokens', async () => {
