@@ -34,16 +34,23 @@ export class FilesController {
     if (!file) throw new NotFoundException('No such file.');
 
     const wantDownload = download === '1' || download === 'true';
-    const filename = `ralia-poster.${EXT_BY_MIME[file.mimeType] ?? 'bin'}`;
+    const ext = EXT_BY_MIME[file.mimeType] ?? 'bin';
+    const filename = `ralia-poster.${ext}`;
 
     // Provider-agnostic: a remote provider (Cloudinary/R2) yields an http(s) URL we
     // just redirect to (browser loads the CDN directly); the local dev provider
     // yields a file:// path, so we stream the bytes ourselves. Callers never care.
     const url = await this.storage.signedUrl(file.storageKey);
     if (/^https?:\/\//i.test(url)) {
-      // Cloudinary forces a download via the fl_attachment delivery flag; other
-      // hosts fall back to a plain redirect (can't force cross-origin).
-      const finalUrl = wantDownload && url.includes('/upload/') ? url.replace('/upload/', `/upload/fl_attachment:${filename}/`) : url;
+      // Cloudinary forces a download via the fl_attachment delivery flag. The custom
+      // name must be given WITHOUT an extension - Cloudinary appends the right one from
+      // the asset's format. Passing "name.png" produces an invalid transformation that
+      // Cloudinary serves as a 400/404, which reads as "the poster won't download" while
+      // the plain (untransformed) URL the admin uses still shows fine. Only the
+      // Cloudinary '/upload/' path can take the flag; other hosts get a plain redirect.
+      const finalUrl = wantDownload && url.includes('/upload/')
+        ? url.replace('/upload/', '/upload/fl_attachment:ralia-poster/')
+        : url;
       res.redirect(302, finalUrl);
       return;
     }
