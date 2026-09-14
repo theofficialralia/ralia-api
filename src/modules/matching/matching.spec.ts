@@ -92,7 +92,7 @@ describe('matching — candidates, offers, accept', () => {
     return admin.id;
   }
 
-  async function makeLiveCampaign(slots: number, opts: { minReach?: number; platform?: Platform; state?: string } = {}): Promise<string> {
+  async function makeLiveCampaign(slots: number, opts: { minReach?: number; platform?: Platform; state?: string; destination?: string | null } = {}): Promise<string> {
     const owner = await prisma.user.create({
       data: { email: `c${seq++}@x.com`, phoneE164: `+23481${String(seq).padStart(8, '0')}`, passwordHash: 'x', status: 'ACTIVE', roles: { create: { role: Role.CLIENT } } },
     });
@@ -100,7 +100,7 @@ describe('matching — candidates, offers, accept', () => {
     const campaign = await prisma.campaign.create({
       data: {
         clientOrgId: org.id, name: `Camp${seq}`, objective: CampaignObjective.AWARENESS,
-        destinationUrl: 'https://x.example/go', status: CampaignStatus.LIVE,
+        destinationUrl: opts.destination === undefined ? 'https://x.example/go' : opts.destination, status: CampaignStatus.LIVE,
         budgetMinor: 34500n, priceMinor: 34500n, slotsTotal: slots, quotedAt: new Date(),
         targeting: {
           create: {
@@ -212,6 +212,22 @@ describe('matching — candidates, offers, accept', () => {
 
     const offer = await prisma.offer.findUnique({ where: { id: offerId } });
     expect(offer!.status).toBe(OfferStatus.ACCEPTED);
+  });
+
+  it('creates no tracking link when the campaign has no destination (never a dead /r link)', async () => {
+    const campaignId = await makeLiveCampaign(2, { destination: null });
+    const p = await makePromoter();
+    const offerId = await sendOffer(campaignId, p.userId);
+
+    const a = await matching.accept(offerId, p.userId);
+    expect(a.tracking_token).toBeTruthy(); // the assignment still has its token
+    // …but no shareable link row exists, so the promoter is never handed a /r link
+    // that would resolve to nothing.
+    expect(await prisma.trackingLink.findUnique({ where: { assignmentId: a.id } })).toBeNull();
+
+    // And the assignment detail surfaces tracking_url as null (UI hides the step).
+    const detail = await matching.assignmentDetail(p.userId, a.id);
+    expect(detail.tracking_url).toBeNull();
   });
 
   it('declining an offer leaves slots untouched', async () => {

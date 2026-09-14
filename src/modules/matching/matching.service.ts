@@ -43,6 +43,31 @@ import { CandidateDto, OfferDto, AssignmentDto } from './dto/matching.dto';
 @Injectable()
 export class MatchingService {
   private readonly logger = new Logger(MatchingService.name);
+  private static trackingBaseWarned = false;
+
+  /**
+   * The public origin the promoter's /r/:token link is built against. It MUST be the
+   * API host that serves the redirect (the /r route sits at the root, outside /v1).
+   * If it is left pointing at a web/marketing host, /r/:token has no handler there and
+   * the browser lands on that site's homepage instead of the campaign destination —
+   * exactly the "tracking link goes to the homepage" bug. Warn loudly (once) if it
+   * still resolves to localhost outside dev, since that means the env is unset.
+   */
+  private trackingBaseUrl(): string {
+    const base = process.env.TRACKING_BASE_URL ?? process.env.APP_BASE_URL ?? 'http://localhost:6100';
+    const env = process.env.NODE_ENV;
+    if (
+      !MatchingService.trackingBaseWarned &&
+      env && env !== 'development' && env !== 'test' &&
+      /localhost|127\.0\.0\.1/.test(base)
+    ) {
+      MatchingService.trackingBaseWarned = true;
+      this.logger.error(
+        `⚠️  Tracking links are being built against ${base}. Set APP_BASE_URL (or TRACKING_BASE_URL) to the PUBLIC API origin that serves /r/:token, or promoters' shared links will land on the wrong site instead of the campaign destination.`,
+      );
+    }
+    return base;
+  }
 
   constructor(
     private readonly prisma: PrismaService,
@@ -492,11 +517,17 @@ export class MatchingService {
         },
       });
 
-      // The tracking link exists because an assignment exists; B6 adds the
-      // redirect endpoint and click ingestion over this row.
-      await tx.trackingLink.create({
-        data: { token: trackingToken, assignmentId: assignment.id, destinationUrl: campaign.destinationUrl ?? '' },
-      });
+      // A tracking link only makes sense when there is a real place to send clicks.
+      // Without a valid destination (e.g. a "post our poster to your status" awareness
+      // campaign, or a brief saved with no link) we create NO link — so the promoter is
+      // never handed a /r/:token that resolves to nothing. The UI then hides the
+      // "share your link" step rather than showing a dead link.
+      const destinationUrl = campaign.destinationUrl?.trim();
+      if (destinationUrl && /^https?:\/\//i.test(destinationUrl)) {
+        await tx.trackingLink.create({
+          data: { token: trackingToken, assignmentId: assignment.id, destinationUrl },
+        });
+      }
 
       await tx.campaign.update({ where: { id: offer.campaign_id }, data: { slotsFilled: { increment: 1 } } });
 
@@ -657,7 +688,7 @@ export class MatchingService {
     const posterAsset = assets.find((x) => x.kind === 'POSTER' && x.file) ?? assets.find((x) => x.kind === 'IMAGE' && x.file);
     const captionAsset = assets.find((x) => x.kind === 'CAPTION' && x.captionText);
     const sub = a.submissions[0];
-    const trackingBase = process.env.TRACKING_BASE_URL ?? process.env.APP_BASE_URL ?? 'http://localhost:6100';
+    const trackingBase = this.trackingBaseUrl();
 
     // §multi-day: the per-post timeline. One-off assignments have exactly one slot;
     // recurring ones expose "Day 1…N" each with its own deadline, status and proof.
