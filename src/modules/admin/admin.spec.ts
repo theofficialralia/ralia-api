@@ -257,13 +257,16 @@ describe('admin — decisions, money and audit', () => {
     const escrow = await prisma.account.findFirstOrThrow({ where: { kind: AccountKind.CAMPAIGN_ESCROW } });
 
     // promised 1000, verified 800 (≥ 70%). delivered_gross = 3450×800/1000 = 2760;
-    // fee = round(2760×0.5) = 1380. Ralia keeps the rest of the slot gross: 3450 − 1380 = 2070.
+    // fee = round(2760×0.5) = 1380, take on the delivered portion = 2760 − 1380 = 1380.
+    // The undelivered 690 kobo stays in escrow (§auto-reopen) — but this campaign has no
+    // reach target and no work left, so it fulfils and the 690 is swept to revenue at
+    // close: revenue = 1380 (take) + 690 (retained remainder) = 2070. No client refund.
     await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: 800 }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
 
     expect(await balanceOf(AccountKind.PROMOTER_AVAILABLE, promoterId)).toBe(1380n);
-    expect(await balanceOf(AccountKind.RALIA_REVENUE)).toBe(2070n); // take on delivered + undelivered remainder
+    expect(await balanceOf(AccountKind.RALIA_REVENUE)).toBe(2070n); // 1380 pro-rata take + 690 retained at fulfilment
     expect(await balanceOf(AccountKind.CLIENT_WALLET, campaign.clientOrgId)).toBe(0n); // no refund — no client wallet
-    expect(await balanceOfAccount(escrow.id, AccountKind.CAMPAIGN_ESCROW)).toBe(0n); // 1380 + 2070 = 3450
+    expect(await balanceOfAccount(escrow.id, AccountKind.CAMPAIGN_ESCROW)).toBe(0n); // 1380 + 1380 paid out, 690 swept
 
     const submission = await prisma.submission.findUniqueOrThrow({ where: { id: submissionId } });
     expect(submission.verifiedReach).toBe(800);
@@ -291,6 +294,53 @@ describe('admin — decisions, money and audit', () => {
     const done = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
     expect(done.status).toBe(CampaignStatus.FULFILLED); // 800 verified ≥ 500 target
     expect(await prisma.campaignSlot.count({ where: { campaignId, status: SlotStatus.OPEN } })).toBe(1); // slot stayed open
+  });
+
+  it('reopens more slots at no extra charge when verified reach falls short and escrow can fund it', async () => {
+    const adminId = await makeAdmin();
+    const promoterId = await makePromoter();
+    // Funded for two slots' worth of escrow but sized as one slot, targeting 2,000 reach.
+    // One promoter delivers a full 1,000 — half the target — so with a second slot's worth
+    // of escrow still on hand the campaign must REOPEN rather than settle short.
+    const n = seq++;
+    const owner = await prisma.user.create({ data: { email: `rc${n}@x.com`, phoneE164: `+23482${String(n).padStart(8, '0')}`, passwordHash: 'x' } });
+    const org = await prisma.clientOrg.create({ data: { ownerUserId: owner.id, name: `ROrg${n}` } });
+    const campaign = await prisma.campaign.create({
+      data: {
+        clientOrgId: org.id, name: `RC${n}`, objective: CampaignObjective.AWARENESS,
+        destinationUrl: 'https://x.example/go', status: CampaignStatus.CONFIRMING_PAYMENT,
+        budgetMinor: UNIT_PRICE * 2n, priceMinor: UNIT_PRICE * 2n, slotsTotal: 1, targetReach: 2000, quotedAt: new Date(),
+        slots: { create: [{ role: PromoterRole.DISTRIBUTOR, unitPriceMinor: UNIT_PRICE, status: SlotStatus.OPEN }] },
+      },
+    });
+    await http().post(`/admin/campaigns/${campaign.id}/fund`).set(bearer(adminId, [Role.ADMIN])).set(key()).send({ amount_minor: Number(UNIT_PRICE * 2n) }).expect(200);
+    await http().post(`/admin/campaigns/${campaign.id}/approve`).set(bearer(adminId, [Role.ADMIN])).expect(200);
+
+    const channel = await prisma.channel.findFirstOrThrow({ where: { promoterId } });
+    const slot = await prisma.campaignSlot.findFirstOrThrow({ where: { campaignId: campaign.id } });
+    const offer = await prisma.offer.create({
+      data: { campaignId: campaign.id, promoterId, channelId: channel.id, role: PromoterRole.DISTRIBUTOR, feeMinor: FEE, grossMinor: UNIT_PRICE, promisedReach: PROMISED, expiresAt: new Date(Date.now() + 1e6), status: 'ACCEPTED' },
+    });
+    const assignment = await prisma.assignment.create({
+      data: {
+        offerId: offer.id, campaignId: campaign.id, promoterId, channelId: channel.id, slotId: slot.id,
+        role: PromoterRole.DISTRIBUTOR, feeMinor: FEE, grossMinor: UNIT_PRICE, promisedReach: PROMISED,
+        trackingToken: randomBytes(12).toString('base64url'), status: AssignmentStatus.SUBMITTED,
+      },
+    });
+    await prisma.campaignSlot.update({ where: { id: slot.id }, data: { status: SlotStatus.FILLED } });
+    const submission = await prisma.submission.create({ data: { assignmentId: assignment.id, verdict: Verdict.PENDING } });
+
+    await http().post(`/admin/submissions/${submission.id}/approve`).send({ verified_views: PROMISED }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+
+    const after = await prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id } });
+    expect(after.status).toBe(CampaignStatus.LIVE); // target not met → not fulfilled
+    expect(after.slotsTotal).toBe(2); // one more slot opened to close the gap
+    expect(await prisma.campaignSlot.count({ where: { campaignId: campaign.id, status: SlotStatus.OPEN } })).toBe(1);
+    // Escrow keeps the reopened slot's funding — nothing swept to revenue while still live.
+    expect(await balanceOfAccount(after.escrowAccountId!, AccountKind.CAMPAIGN_ESCROW)).toBe(UNIT_PRICE); // second slot's worth still held
+    const reopened = await prisma.notification.findFirst({ where: { userId: owner.id, type: 'campaign.reopened' } });
+    expect(reopened?.body).toMatch(/matching new promoters/i);
   });
 
   it('a delivery below the threshold is refused and moves no money', async () => {

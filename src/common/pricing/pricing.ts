@@ -135,13 +135,18 @@ export function splitFee(
  *   meets_threshold = verified ≥ τ × promised                     (below τ → reject, do not pay)
  *   delivered_gross = round(gross × min(verified, promised) / promised)
  *   fee             = splitFee(delivered_gross).fee               (promoter, pro-rata)
- *   take            = gross − fee                                 (Ralia's cut + any undelivered remainder)
+ *   take            = delivered_gross − fee                       (Ralia's cut on the DELIVERED portion)
+ *   escrow_retained = gross − delivered_gross                     (the undelivered remainder)
  *
- * fee + take = gross exactly, so escrow conserves. There is NO client refund:
- * the platform has no client wallet, so an under-delivery is not returned — the
- * promoter is paid for what they delivered and Ralia retains the remainder.
- * Integer kobo throughout; `promised` must be positive (a zero-reach promoter is
- * never offered).
+ * fee + take = delivered_gross leaves escrow (the ledger debits exactly that and
+ * credits fee + take); escrow_retained stays put. fee + take + escrow_retained =
+ * gross, so escrow still conserves to the kobo. The undelivered remainder is NOT
+ * booked as revenue here — it stays in escrow so a campaign that fell short of the
+ * reach the client paid for can REOPEN slots and buy the missing reach (see
+ * AdminService completion). There is still no client refund: whatever a campaign
+ * cannot re-deliver stays in escrow, retained by the platform, until the campaign
+ * finalises. Integer kobo throughout; `promised` must be positive (a zero-reach
+ * promoter is never offered).
  */
 export type SettlementConfig = {
   takeRateHundredths: number;
@@ -154,6 +159,8 @@ export type Settlement = {
   deliveredGrossMinor: bigint;
   promoterFeeMinor: bigint;
   raliaTakeMinor: bigint;
+  /** gross − delivered_gross: the undelivered portion, left in escrow to fund a reopen. */
+  escrowRetainedMinor: bigint;
 };
 
 export function settleDelivery(
@@ -176,13 +183,15 @@ export function settleDelivery(
   // Over-delivery is capped at the promised amount — the fee is a ceiling.
   const effective = Math.min(verifiedReach, promisedReach);
   const deliveredGrossMinor = divRound(grossMinor * BigInt(effective), BigInt(promisedReach));
-  // Promoter is paid pro-rata on what they delivered; Ralia keeps the rest of the
-  // slot gross (its take on the delivered portion PLUS any undelivered remainder).
-  // No client refund — there is no client wallet to return it to.
+  // Promoter is paid pro-rata on what they delivered; Ralia takes its cut on the
+  // DELIVERED portion only. The undelivered remainder (gross − delivered_gross) is
+  // left in escrow — not booked as revenue — so a short campaign can reopen slots
+  // and buy the reach the client paid for. Only fee + take leaves escrow.
   const { promoterFeeMinor } = splitFee(deliveredGrossMinor, config);
-  const raliaTakeMinor = grossMinor - promoterFeeMinor;
+  const raliaTakeMinor = deliveredGrossMinor - promoterFeeMinor;
+  const escrowRetainedMinor = grossMinor - deliveredGrossMinor;
 
-  return { meetsThreshold, deliveredGrossMinor, promoterFeeMinor, raliaTakeMinor };
+  return { meetsThreshold, deliveredGrossMinor, promoterFeeMinor, raliaTakeMinor, escrowRetainedMinor };
 }
 
 /**

@@ -123,7 +123,7 @@ describe('evidence — submission and duplicate detection', () => {
     const firstRes = await http()
       .post(`/assignments/${first.assignmentId}/submission`)
       .set({ Authorization: `Bearer ${token(first.promoterId)}` })
-      .attach('file', image, { filename: 'proof.png', contentType: 'image/png' })
+      .attach('file', image, { filename: 'proof.png', contentType: 'image/png' }).field('claimed_views', '500')
       .expect(201);
     expect(firstRes.body.auto_flag).toBe(false);
 
@@ -132,7 +132,7 @@ describe('evidence — submission and duplicate detection', () => {
     const secondRes = await http()
       .post(`/assignments/${second.assignmentId}/submission`)
       .set({ Authorization: `Bearer ${token(second.promoterId)}` })
-      .attach('file', image, { filename: 'proof.png', contentType: 'image/png' })
+      .attach('file', image, { filename: 'proof.png', contentType: 'image/png' }).field('claimed_views', '500')
       .expect(201);
 
     expect(secondRes.body.auto_flag).toBe(true);
@@ -151,11 +151,11 @@ describe('evidence — submission and duplicate detection', () => {
 
     const a = await makeAssignment();
     await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(a.promoterId)}` })
-      .attach('file', original, { filename: 'a.png', contentType: 'image/png' }).expect(201);
+      .attach('file', original, { filename: 'a.png', contentType: 'image/png' }).field('claimed_views', '500').expect(201);
 
     const b = await makeAssignment();
     const res = await http().post(`/assignments/${b.assignmentId}/submission`).set({ Authorization: `Bearer ${token(b.promoterId)}` })
-      .attach('file', mangled, { filename: 'b.jpg', contentType: 'image/jpeg' }).expect(201);
+      .attach('file', mangled, { filename: 'b.jpg', contentType: 'image/jpeg' }).field('claimed_views', '500').expect(201);
 
     expect(res.body.auto_flag).toBe(true);
   });
@@ -163,11 +163,11 @@ describe('evidence — submission and duplicate detection', () => {
   it('does not flag genuinely different screenshots', async () => {
     const a = await makeAssignment();
     await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(a.promoterId)}` })
-      .attach('file', await makeImage(1), { filename: 'a.png', contentType: 'image/png' }).expect(201);
+      .attach('file', await makeImage(1), { filename: 'a.png', contentType: 'image/png' }).field('claimed_views', '500').expect(201);
 
     const b = await makeAssignment();
     const res = await http().post(`/assignments/${b.assignmentId}/submission`).set({ Authorization: `Bearer ${token(b.promoterId)}` })
-      .attach('file', await makeImage(4), { filename: 'b.png', contentType: 'image/png' }).expect(201);
+      .attach('file', await makeImage(4), { filename: 'b.png', contentType: 'image/png' }).field('claimed_views', '500').expect(201);
 
     expect(res.body.auto_flag).toBe(false);
     const artifacts = await prisma.proofArtifact.findMany({ orderBy: { createdAt: 'asc' } });
@@ -180,7 +180,7 @@ describe('evidence — submission and duplicate detection', () => {
     for (let i = 0; i < 3; i++) {
       const a = await makeAssignment();
       await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(a.promoterId)}` })
-        .attach('file', image, { filename: 'p.png', contentType: 'image/png' }).expect(201);
+        .attach('file', image, { filename: 'p.png', contentType: 'image/png' }).field('claimed_views', '500').expect(201);
       ids.push(a.assignmentId);
     }
 
@@ -197,12 +197,12 @@ describe('evidence — submission and duplicate detection', () => {
   it('every submission lands PENDING — nothing auto-approves, flagged or not', async () => {
     const clean = await makeAssignment();
     const cleanRes = await http().post(`/assignments/${clean.assignmentId}/submission`).set({ Authorization: `Bearer ${token(clean.promoterId)}` })
-      .attach('file', await makeImage(5), { filename: 'a.png', contentType: 'image/png' }).expect(201);
+      .attach('file', await makeImage(5), { filename: 'a.png', contentType: 'image/png' }).field('claimed_views', '500').expect(201);
     expect(cleanRes.body.verdict).toBe(Verdict.PENDING);
 
     const dup = await makeAssignment();
     const dupRes = await http().post(`/assignments/${dup.assignmentId}/submission`).set({ Authorization: `Bearer ${token(dup.promoterId)}` })
-      .attach('file', await makeImage(5), { filename: 'b.png', contentType: 'image/png' }).expect(201);
+      .attach('file', await makeImage(5), { filename: 'b.png', contentType: 'image/png' }).field('claimed_views', '500').expect(201);
     // Flagged, but still PENDING — the flag informs a human, it does not reject.
     expect(dupRes.body.auto_flag).toBe(true);
     expect(dupRes.body.verdict).toBe(Verdict.PENDING);
@@ -214,7 +214,7 @@ describe('evidence — submission and duplicate detection', () => {
   it('moves the assignment to SUBMITTED', async () => {
     const a = await makeAssignment();
     await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(a.promoterId)}` })
-      .attach('file', await makeImage(6), { filename: 'a.png', contentType: 'image/png' }).expect(201);
+      .attach('file', await makeImage(6), { filename: 'a.png', contentType: 'image/png' }).field('claimed_views', '500').expect(201);
 
     const assignment = await prisma.assignment.findUnique({ where: { id: a.assignmentId } });
     expect(assignment!.status).toBe(AssignmentStatus.SUBMITTED);
@@ -228,10 +228,26 @@ describe('evidence — submission and duplicate detection', () => {
       .field('note', 'no file attached').expect(400);
   });
 
+  it('requires a view count — it is no longer optional (drives reopen)', async () => {
+    const a = await makeAssignment();
+    // A screenshot but no claimed_views is rejected: the manual count is mandatory now.
+    await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(a.promoterId)}` })
+      .attach('file', await makeImage(20), { filename: 'a.png', contentType: 'image/png' }).expect(400);
+    expect(await prisma.submission.count({ where: { assignmentId: a.assignmentId } })).toBe(0);
+  });
+
+  it('records the promoter’s view count on the submission', async () => {
+    const a = await makeAssignment();
+    const res = await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(a.promoterId)}` })
+      .attach('file', await makeImage(21), { filename: 'a.png', contentType: 'image/png' })
+      .field('claimed_views', '842').expect(201);
+    expect(res.body.claimed_views).toBe(842);
+  });
+
   it('accepts a submission without a public URL (WhatsApp status has none)', async () => {
     const a = await makeAssignment();
     const res = await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(a.promoterId)}` })
-      .attach('file', await makeImage(7), { filename: 'a.png', contentType: 'image/png' })
+      .attach('file', await makeImage(7), { filename: 'a.png', contentType: 'image/png' }).field('claimed_views', '500')
       .field('note', 'Posted to my status').expect(201);
     expect(res.body.public_url).toBeNull();
     expect(res.body.note).toBe('Posted to my status');
@@ -240,7 +256,7 @@ describe('evidence — submission and duplicate detection', () => {
   it('stores a public URL when given', async () => {
     const a = await makeAssignment();
     const res = await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(a.promoterId)}` })
-      .attach('file', await makeImage(8), { filename: 'a.png', contentType: 'image/png' })
+      .attach('file', await makeImage(8), { filename: 'a.png', contentType: 'image/png' }).field('claimed_views', '500')
       .field('public_url', 'https://instagram.com/p/abc123').expect(201);
     expect(res.body.public_url).toBe('https://instagram.com/p/abc123');
   });
@@ -252,7 +268,7 @@ describe('evidence — submission and duplicate detection', () => {
 
     // Correct MIME, but the bytes are not an image.
     await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(a.promoterId)}` })
-      .attach('file', Buffer.from('not an image at all'), { filename: 'x.png', contentType: 'image/png' }).expect(400);
+      .attach('file', Buffer.from('not an image at all'), { filename: 'x.png', contentType: 'image/png' }).field('claimed_views', '500').expect(400);
 
     // Nothing was stored for either attempt.
     expect(await prisma.submission.count()).toBe(0);
@@ -265,34 +281,34 @@ describe('evidence — submission and duplicate detection', () => {
     const a = await makeAssignment();
     const other = await makeAssignment();
     await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(other.promoterId)}` })
-      .attach('file', await makeImage(9), { filename: 'a.png', contentType: 'image/png' }).expect(404);
+      .attach('file', await makeImage(9), { filename: 'a.png', contentType: 'image/png' }).field('claimed_views', '500').expect(404);
   });
 
   it('cannot submit twice while already awaiting review', async () => {
     const a = await makeAssignment();
     await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(a.promoterId)}` })
-      .attach('file', await makeImage(10), { filename: 'a.png', contentType: 'image/png' }).expect(201);
+      .attach('file', await makeImage(10), { filename: 'a.png', contentType: 'image/png' }).field('claimed_views', '500').expect(201);
     // Now SUBMITTED — not awaiting proof.
     await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(a.promoterId)}` })
-      .attach('file', await makeImage(11), { filename: 'b.png', contentType: 'image/png' }).expect(400);
+      .attach('file', await makeImage(11), { filename: 'b.png', contentType: 'image/png' }).field('claimed_views', '500').expect(400);
   });
 
   it('allows resubmission after a rejection', async () => {
     const a = await makeAssignment();
     await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(a.promoterId)}` })
-      .attach('file', await makeImage(12), { filename: 'a.png', contentType: 'image/png' }).expect(201);
+      .attach('file', await makeImage(12), { filename: 'a.png', contentType: 'image/png' }).field('claimed_views', '500').expect(201);
     // §multi-day: an admin rejection reopens the post at the slot level.
     await prisma.deliverySlot.update({ where: { id: a.deliverySlotId }, data: { status: 'REJECTED' } });
     await prisma.assignment.update({ where: { id: a.assignmentId }, data: { status: AssignmentStatus.REJECTED } });
 
     await http().post(`/assignments/${a.assignmentId}/submission`).set({ Authorization: `Bearer ${token(a.promoterId)}` })
-      .attach('file', await makeImage(13), { filename: 'b.png', contentType: 'image/png' }).expect(201);
+      .attach('file', await makeImage(13), { filename: 'b.png', contentType: 'image/png' }).field('claimed_views', '500').expect(201);
     expect(await prisma.submission.count({ where: { assignmentId: a.assignmentId } })).toBe(2);
   });
 
   it('requires authentication', async () => {
     const a = await makeAssignment();
     await http().post(`/assignments/${a.assignmentId}/submission`)
-      .attach('file', await makeImage(14), { filename: 'a.png', contentType: 'image/png' }).expect(401);
+      .attach('file', await makeImage(14), { filename: 'a.png', contentType: 'image/png' }).field('claimed_views', '500').expect(401);
   });
 });

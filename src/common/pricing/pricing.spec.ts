@@ -126,12 +126,13 @@ describe('pricing (§5.2)', () => {
     // gross 3000 kobo (awareness, 1000 reach), τ = 70%, take 50%.
     const SETTLE: SettlementConfig = { takeRateHundredths: 50, deliveryThresholdPct: 70 };
 
-    it('full delivery pays the whole fee, take is the rest', () => {
+    it('full delivery pays the whole fee, take is the rest, nothing retained', () => {
       const s = settleDelivery(3000n, 1000, 1000, SETTLE);
       expect(s.meetsThreshold).toBe(true);
       expect(s.deliveredGrossMinor).toBe(3000n);
       expect(s.promoterFeeMinor).toBe(1500n);
-      expect(s.raliaTakeMinor).toBe(1500n); // gross − fee
+      expect(s.raliaTakeMinor).toBe(1500n); // delivered_gross − fee
+      expect(s.escrowRetainedMinor).toBe(0n); // nothing under-delivered
     });
 
     it('over-delivery is capped at 100% — the fee is a ceiling', () => {
@@ -139,17 +140,20 @@ describe('pricing (§5.2)', () => {
       expect(s.deliveredGrossMinor).toBe(3000n);
       expect(s.promoterFeeMinor).toBe(1500n);
       expect(s.raliaTakeMinor).toBe(1500n);
+      expect(s.escrowRetainedMinor).toBe(0n);
       expect(s.meetsThreshold).toBe(true);
     });
 
-    it('partial delivery above the threshold pays pro-rata; Ralia keeps the remainder (no refund)', () => {
-      // 800/1000 ≥ 70% → paid. delivered_gross = 3000×800/1000 = 2400, fee = 1200.
-      // Ralia's take is the whole rest of the slot gross: 3000 − 1200 = 1800.
+    it('partial delivery above the threshold pays pro-rata; the remainder stays in escrow to reopen', () => {
+      // 800/1000 ≥ 70% → paid. delivered_gross = 3000×800/1000 = 2400, fee = 1200,
+      // take on the delivered portion = 2400 − 1200 = 1200. The undelivered 600 kobo
+      // stays in escrow (not booked to Ralia) so the campaign can reopen and re-buy it.
       const s = settleDelivery(3000n, 800, 1000, SETTLE);
       expect(s.meetsThreshold).toBe(true);
       expect(s.deliveredGrossMinor).toBe(2400n);
       expect(s.promoterFeeMinor).toBe(1200n); // 2400 × 0.5
-      expect(s.raliaTakeMinor).toBe(1800n); // gross − fee (take on delivered + undelivered remainder)
+      expect(s.raliaTakeMinor).toBe(1200n); // delivered_gross − fee (delivered portion only)
+      expect(s.escrowRetainedMinor).toBe(600n); // gross − delivered_gross, left in escrow
     });
 
     it('the threshold boundary is inclusive (verified = τ × promised)', () => {
@@ -167,27 +171,33 @@ describe('pricing (§5.2)', () => {
       expect(s.meetsThreshold).toBe(false);
       expect(s.deliveredGrossMinor).toBe(0n);
       expect(s.promoterFeeMinor).toBe(0n);
-      expect(s.raliaTakeMinor).toBe(3000n); // gross − fee; caller rejects below τ so this is never posted
+      expect(s.raliaTakeMinor).toBe(0n); // nothing delivered → nothing taken
+      expect(s.escrowRetainedMinor).toBe(3000n); // whole gross stays in escrow (caller rejects below τ anyway)
     });
 
     it('rounds without losing a kobo (odd gross, odd ratio)', () => {
       // delivered_gross = round(4501 × 777 / 1000) = round(3497.277) = 3497
-      // fee = round(3497 × 0.5) = round(1748.5) = 1749, take = gross − fee = 4501 − 1749 = 2752
+      // fee = round(3497 × 0.5) = round(1748.5) = 1749, take = delivered_gross − fee = 3497 − 1749 = 1748
+      // escrow_retained = 4501 − 3497 = 1004
       const s = settleDelivery(4501n, 777, 1000, SETTLE);
       expect(s.deliveredGrossMinor).toBe(3497n);
       expect(s.promoterFeeMinor).toBe(1749n);
-      expect(s.raliaTakeMinor).toBe(2752n);
+      expect(s.raliaTakeMinor).toBe(1748n);
+      expect(s.escrowRetainedMinor).toBe(1004n);
     });
 
-    it('fee + take equals gross exactly, so escrow never leaks', () => {
-      // The approve posting debits escrow by fee + take (the full slot gross); a
-      // one-kobo disagreement would strand money in escrow. No client refund leg.
+    it('fee + take + retained equals gross exactly, so escrow never leaks', () => {
+      // The approve posting debits escrow by fee + take (the delivered gross) and
+      // leaves the retained remainder in escrow; the three must sum to the full gross
+      // or escrow would leak. No client refund leg.
       for (let gross = 0n; gross <= 20_000n; gross += 137n) {
         for (const [verified, promised] of [[0, 1000], [1, 1000], [499, 1000], [700, 1000], [999, 1000], [1000, 1000], [5000, 5000], [3333, 5000]] as const) {
           const s = settleDelivery(gross, verified, promised, SETTLE);
-          expect(s.promoterFeeMinor + s.raliaTakeMinor).toBe(gross);
+          expect(s.promoterFeeMinor + s.raliaTakeMinor).toBe(s.deliveredGrossMinor);
+          expect(s.promoterFeeMinor + s.raliaTakeMinor + s.escrowRetainedMinor).toBe(gross);
           expect(s.promoterFeeMinor).toBeGreaterThanOrEqual(0n);
           expect(s.raliaTakeMinor).toBeGreaterThanOrEqual(0n);
+          expect(s.escrowRetainedMinor).toBeGreaterThanOrEqual(0n);
           expect(s.deliveredGrossMinor).toBeGreaterThanOrEqual(0n);
           expect(s.deliveredGrossMinor).toBeLessThanOrEqual(gross);
         }

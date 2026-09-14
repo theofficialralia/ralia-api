@@ -428,6 +428,36 @@ export class LedgerService {
     });
   }
 
+  /**
+   * A campaign finalises with escrow still holding the undelivered remainder that
+   * settleDelivery left behind (a short campaign that could not reopen to buy the
+   * missing reach). Policy is no client refund — the platform retains it — so it is
+   * booked to revenue now, at close, rather than per-approval. DR CAMPAIGN_ESCROW /
+   * CR RALIA_REVENUE. Idempotent via the key, so a re-run of the completion path
+   * never double-books.
+   */
+  async retainCampaignRemainder(args: {
+    campaignId: string;
+    escrowAccountId: string;
+    amountMinor: bigint;
+    idempotencyKey: string;
+    actorId?: string;
+  }): Promise<{ transactionId: string; replayed: boolean }> {
+    const revenue = await this.getPlatformAccountId(AccountKind.RALIA_REVENUE);
+    return this.post({
+      kind: LedgerTransactionKind.ADJUSTMENT,
+      referenceType: 'campaign',
+      referenceId: args.campaignId,
+      idempotencyKey: args.idempotencyKey,
+      memo: `Undelivered escrow retained for campaign ${args.campaignId}`,
+      createdBy: args.actorId,
+      entries: [
+        { accountId: args.escrowAccountId, direction: EntryDirection.DEBIT, amountMinor: args.amountMinor },
+        { accountId: revenue, direction: EntryDirection.CREDIT, amountMinor: args.amountMinor },
+      ],
+    });
+  }
+
   /** Campaign ends with unspent escrow. DR CAMPAIGN_ESCROW / CR CLIENT_WALLET. */
   async refundCampaign(args: {
     campaignId: string;

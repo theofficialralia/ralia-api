@@ -25,12 +25,11 @@ export class CreateSubmissionDto {
   @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   note?: string;
 
-  @ApiPropertyOptional({ example: 842, description: 'Views the promoter reports on the post; the admin verifies this at approval and pay is pro-rata on the verified figure.' })
-  @IsOptional()
+  @ApiProperty({ example: 842, description: 'Views the promoter reports on the post (required). The admin verifies this at approval; pay is pro-rata on the verified figure, and the campaign stays open until verified views reach the target.' })
   @Type(() => Number)
   @IsInt()
-  @Min(0)
-  claimed_views?: number;
+  @Min(1, { message: 'Enter the number of views this post reached (it drives delivery, so it can’t be blank).' })
+  claimed_views!: number;
 }
 
 export class SubmissionDto {

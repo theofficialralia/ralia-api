@@ -42,6 +42,8 @@ export function notificationCta(type: string, data: unknown): Cta | null {
       return campaignId ? { label: 'Review campaign', url: `${CLIENT_URL}/campaigns/${campaignId}` } : null;
     case 'campaign.evidence_verified':
       return campaignId ? { label: 'See the proof', url: `${CLIENT_URL}/campaigns/${campaignId}` } : null;
+    case 'campaign.reopened':
+      return campaignId ? { label: 'Track progress', url: `${CLIENT_URL}/campaigns/${campaignId}` } : null;
     case 'campaign.fulfilled':
       return campaignId ? { label: 'View campaign report', url: `${CLIENT_URL}/campaigns/${campaignId}` } : null;
 

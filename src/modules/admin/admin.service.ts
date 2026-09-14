@@ -9,6 +9,7 @@ import {
   EntryDirection,
   KycStatus,
   Prisma,
+  PromoterRole,
   PromoterStatus,
   ReconciliationStatus,
   Role,
@@ -19,7 +20,7 @@ import {
   WithdrawalStatus,
 } from '@prisma/client';
 import { computeAssignmentRollup } from '../../common/delivery/delivery';
-import { settleDelivery } from '../../common/pricing/pricing';
+import { categoryForRole, settleDelivery } from '../../common/pricing/pricing';
 import { asRoleConfig, describeRoleTask } from '../../common/campaign/role-task';
 import { channelEffectiveReach } from '../../common/reach/effective-reach';
 import { STORAGE, StorageProvider } from '../../common/storage/storage';
@@ -509,6 +510,28 @@ export class AdminService {
         ? assignment.deliverySlots.map((s) => ({ index: s.index, status: s.id === slot?.id ? DeliverySlotStatus.APPROVED : s.status }))
         : [{ index: 1, status: DeliverySlotStatus.APPROVED }];
       const rollup = computeAssignmentRollup(nextSlotViews);
+
+      // §auto-reopen — economics for a possible reopen, resolved before the tx (pure
+      // config + a ledger read; no writes). A campaign that falls short of the reach
+      // the client paid for (targetReach) re-buys the missing reach with the escrow
+      // that settleDelivery left behind on under-deliveries, by opening more slots for
+      // the allocation sweep to fill. Each new slot mirrors the campaign's per-slot
+      // economics, so an accepted replacement is priced and reach-targeted identically.
+      const repSlot = await this.prisma.campaignSlot.findFirst({ where: { campaignId: campaign.id } });
+      const reopenCategory = categoryForRole(repSlot?.role ?? PromoterRole.DISTRIBUTOR);
+      const reopenDefaults = await this.rateConfig.getCategoryDefaults(reopenCategory);
+      const reopenTargeting = await this.prisma.campaignTargeting.findUnique({ where: { campaignId: campaign.id } });
+      const posts = campaign.postsRequired;
+      const reachPerPost = (reopenTargeting?.minEffectiveReach ?? 0) > 0 ? reopenTargeting!.minEffectiveReach : reopenDefaults.reachPerSlot;
+      const reachPerSlotTotal = reachPerPost * posts;
+      const unitPricePerPost = repSlot?.unitPriceMinor ?? 0n;
+      const slotCostMinor = unitPricePerPost * BigInt(posts);
+      const escrowBalanceMinor = await this.ledger.getBalance(campaign.escrowAccountId);
+      // Set inside the tx when the campaign finalises with no work left that could
+      // still draw on escrow — the leftover (undelivered) escrow is then swept to
+      // revenue after the tx commits (retainCampaignRemainder runs its own tx).
+      let finalizeRemainder = false;
+
       await this.prisma.$transaction(async (tx) => {
         await tx.submission.update({
           where: { id: submissionId },
@@ -564,10 +587,16 @@ export class AdminService {
           );
         }
 
-        // Fulfilment is decided here, at the approval that resolves the last post:
-        // when no campaign slot is still open AND no scheduled post is still pending
-        // or in review, every promised post has landed and passed review → FULFILLED.
-        // (§multi-day: this is now per-post, not per-assignment.)
+        // §auto-reopen — fulfilment is reach-driven, decided at each approval:
+        //   • target met (Σ verified ≥ what the client paid for) → FULFILLED.
+        //   • target not met but work still in flight (open slots or posts pending/in
+        //     review) → stay LIVE and let it land.
+        //   • target not met and nothing left in flight → try to REOPEN: open as many
+        //     fresh slots as the retained escrow can fund (capped at the reach still
+        //     owed) so the allocation sweep keeps matching. Only when the budget can't
+        //     buy even one more slot do we call it done.
+        // This is what stops a campaign being marked complete on an under-delivery, and
+        // stops the admin ever seeing a shortfall settle as if it were fully delivered.
         if (campaign.status === CampaignStatus.LIVE) {
           const openSlots = await tx.campaignSlot.count({
             where: { campaignId: campaign.id, status: { in: [SlotStatus.OPEN, SlotStatus.OFFERED] } },
@@ -578,17 +607,60 @@ export class AdminService {
               status: { in: [DeliverySlotStatus.PENDING, DeliverySlotStatus.SUBMITTED] },
             },
           });
-          // Reach-driven completion (product decision): a campaign is complete once the
-          // sum of admin-verified reach meets the target the client paid for — even if
-          // some slots never filled. Delivery-complete (all slots landed) still counts.
           const verifiedAgg = await tx.submission.aggregate({
             where: { assignment: { campaignId: campaign.id }, verdict: Verdict.APPROVED },
             _sum: { verifiedReach: true },
           });
           const totalVerified = verifiedAgg._sum.verifiedReach ?? 0;
-          const reachMet = campaign.targetReach > 0 && totalVerified >= campaign.targetReach;
-          if ((openSlots === 0 && outstandingPosts === 0) || reachMet) {
+          const target = campaign.targetReach;
+          const reachMet = target > 0 && totalVerified >= target;
+          const workInFlight = openSlots > 0 || outstandingPosts > 0;
+
+          // How many slots to reopen: enough to close the reach deficit, but never
+          // more than the escrow on hand can actually pay for.
+          let reopenCount = 0;
+          if (!reachMet && !workInFlight && target > 0 && reachPerSlotTotal > 0 && slotCostMinor > 0n) {
+            const deficit = target - totalVerified;
+            const slotsForDeficit = Math.ceil(deficit / reachPerSlotTotal);
+            const slotsAffordable = Number(escrowBalanceMinor / slotCostMinor); // bigint floor
+            reopenCount = Math.max(0, Math.min(slotsForDeficit, slotsAffordable));
+          }
+
+          if (reopenCount > 0) {
+            await tx.campaignSlot.createMany({
+              data: Array.from({ length: reopenCount }, () => ({
+                campaignId: campaign.id,
+                role: repSlot?.role ?? PromoterRole.DISTRIBUTOR,
+                unitPriceMinor: unitPricePerPost,
+                postsRequired: posts,
+              })),
+            });
+            await tx.campaign.update({
+              where: { id: campaign.id },
+              data: { slotsTotal: { increment: reopenCount } },
+            });
+            if (ownerId) {
+              await this.notifications.create(
+                {
+                  userId: ownerId,
+                  type: 'campaign.reopened',
+                  title: 'Still working toward your reach',
+                  body:
+                    `"${campaign.name}" has delivered ${totalVerified.toLocaleString('en-NG')} of ${target.toLocaleString('en-NG')} verified views so far. ` +
+                    `We've opened ${reopenCount} more slot${reopenCount === 1 ? '' : 's'} and are matching new promoters to close the gap - no extra charge.`,
+                  data: { campaignId: campaign.id, totalVerified, targetReach: target, reopened: reopenCount },
+                  // Re-fires each time we reopen, keyed to progress so it's not deduped away.
+                  dedupeKey: `campaign.reopened:${campaign.id}:${totalVerified}`,
+                },
+                tx,
+              );
+            }
+          } else if (reachMet || !workInFlight) {
             await tx.campaign.update({ where: { id: campaign.id }, data: { status: CampaignStatus.FULFILLED } });
+            // Safe to book the leftover escrow to revenue only when nothing in flight
+            // could still be paid from it. If the target was met while offers/posts are
+            // still outstanding, we finalise the status but leave escrow to cover them.
+            finalizeRemainder = !workInFlight;
             if (ownerId) {
               const t = templates.campaignComplete(campaign.id, campaign.name);
               await this.notifications.create(
@@ -618,6 +690,24 @@ export class AdminService {
           tx,
         );
       });
+
+      // §auto-reopen — the campaign finalised with no work left that could still draw
+      // on escrow, so the undelivered remainder settleDelivery kept in escrow is booked
+      // to revenue now (policy: retained by the platform, no client refund). Run after
+      // the tx (retainCampaignRemainder posts its own balanced transaction) and made
+      // idempotent by the key, so a replay never double-books.
+      if (finalizeRemainder) {
+        const remaining = await this.ledger.getBalance(campaign.escrowAccountId);
+        if (remaining > 0n) {
+          await this.ledger.retainCampaignRemainder({
+            campaignId: campaign.id,
+            escrowAccountId: campaign.escrowAccountId,
+            amountMinor: remaining,
+            idempotencyKey: `campaign.retain:${campaign.id}`,
+            actorId: adminId,
+          });
+        }
+      }
     }
 
     return { id: submissionId, status: Verdict.APPROVED, message: replayed ? 'Already recorded.' : 'Approved and settled.' };
