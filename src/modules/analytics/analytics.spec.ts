@@ -140,7 +140,7 @@ describe('analytics — campaign detail and dashboard', () => {
     await prisma.trackingLink.create({ data: { token, assignmentId: assignment.id, destinationUrl: 'https://x.example/go' } });
 
     const file = await prisma.file.create({ data: { storageKey: `k/${n}`, bucket: 'b', mimeType: 'image/png', sizeBytes: 10, checksumSha256: 'x' } });
-    const submission = await prisma.submission.create({ data: { assignmentId: assignment.id, verdict: Verdict.APPROVED, publicUrl: 'https://insta/p/1' } });
+    const submission = await prisma.submission.create({ data: { assignmentId: assignment.id, verdict: Verdict.APPROVED, claimedViews: 900, verifiedReach: 842, publicUrl: 'https://insta/p/1' } });
     await prisma.proofArtifact.create({ data: { submissionId: submission.id, fileId: file.id, phash: 'abc' } });
 
     // Pay the promoter: DR escrow (fee+take), CR promoter (fee), CR revenue (take).
@@ -199,7 +199,11 @@ describe('analytics — campaign detail and dashboard', () => {
     expect(item.promoter_name).toBe('Adaeze Okafor');
     expect(item.promoter_handle).toBe('@adaeze');
     expect(item.platform).toBe('INSTAGRAM');
-    expect(item.views).toBe(5);
+    // views is the promoter's post views (admin-verified once approved), NOT clicks.
+    expect(item.views).toBe(842);
+    expect(item.views_verified).toBe(true);
+    // clicks is the separate tracking-link signal (5 non-bot, 3 bot excluded).
+    expect(item.clicks).toBe(5);
     expect(item.verdict).toBe('APPROVED');
     expect(item.auto_flag).toBe(false);
     expect(item.image_url).toBeTruthy();

@@ -818,7 +818,7 @@ function toFilters(t: {
 
 function toOfferDto(
   o: {
-    id: string; campaignId: string; role: string; feeMinor: bigint; expiresAt: Date; status: OfferStatus;
+    id: string; campaignId: string; role: string; feeMinor: bigint; promisedReach: number; expiresAt: Date; status: OfferStatus;
     score?: Prisma.Decimal | null;
   },
   campaignName: string,
@@ -829,6 +829,7 @@ function toOfferDto(
     campaign_name: campaignName,
     role: o.role,
     fee_minor: Number(o.feeMinor),
+    promised_reach: o.promisedReach,
     expires_at: o.expiresAt.toISOString(),
     status: o.status,
     fit_pct: o.score != null ? Math.round(o.score.toNumber() * 100) : null,

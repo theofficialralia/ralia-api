@@ -38,6 +38,8 @@ export function notificationCta(type: string, data: unknown): Cta | null {
     case 'campaign.approved':
     case 'campaign.live':
       return campaignId ? { label: 'View campaign', url: `${CLIENT_URL}/campaigns/${campaignId}` } : null;
+    case 'campaign.payment_received':
+      return campaignId ? { label: 'View campaign', url: `${CLIENT_URL}/campaigns/${campaignId}` } : null;
     case 'campaign.rejected':
       return campaignId ? { label: 'Review campaign', url: `${CLIENT_URL}/campaigns/${campaignId}` } : null;
     case 'campaign.evidence_verified':

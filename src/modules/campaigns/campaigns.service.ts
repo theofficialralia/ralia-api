@@ -362,6 +362,7 @@ export class CampaignsService {
       estimated_reach: reach * posts,
       eligible_promoters: count,
       active_filters: activeFilterCount(filters),
+      target_reach: slotsTotal * reachPerSlot * posts,
     };
   }
 

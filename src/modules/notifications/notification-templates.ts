@@ -46,6 +46,24 @@ export const templates = {
     data: { app },
   }),
 
+  campaignPaymentReceived: (
+    campaignId: string,
+    campaignName: string,
+    amountDisplay: string,
+    promoters: number,
+    targetReach: number,
+    reference: string,
+  ): Template => ({
+    type: 'campaign.payment_received',
+    title: 'We’ve received your payment',
+    body:
+      `Thank you — your payment of ${amountDisplay} for “${campaignName}” has been received.\n\n` +
+      `What you paid for: ${promoters.toLocaleString('en-NG')} promoter${promoters === 1 ? '' : 's'} working toward ${targetReach.toLocaleString('en-NG')} verified views.\n\n` +
+      'Your campaign is now with our team for review. Nothing goes live until we’ve checked it — we’ll email you the moment it’s approved and promoters start posting.\n\n' +
+      `Payment reference: ${reference}`,
+    data: { campaignId, amountDisplay, promoters, targetReach, reference },
+  }),
+
   campaignLive: (campaignId: string, campaignName: string): Template => ({
     type: 'campaign.live',
     title: 'Your campaign is live!',

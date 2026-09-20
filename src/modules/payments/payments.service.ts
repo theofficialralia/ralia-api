@@ -5,6 +5,7 @@ import { LedgerService } from '../ledger/ledger.service';
 import { AuditService } from '../admin/audit.service';
 import { NotificationService } from '../notifications/notification.service';
 import { templates } from '../notifications/notification-templates';
+import { formatNaira } from '../ledger/money';
 import { PaystackService } from './paystack.service';
 
 /**
@@ -156,7 +157,25 @@ export class PaymentsService {
           },
           tx,
         );
-        // No "campaign is live" email here — that fires when an admin approves it.
+        // Receipt / acknowledgement: confirm the payment and the stage (under review).
+        // No "campaign is live" email here — that fires when an admin approves it. The
+        // recipient is the org owner (resolved here, since the webhook path's actorId
+        // can be an org id, not a user id).
+        const owner = await tx.clientOrg.findUnique({ where: { id: campaign.clientOrgId }, select: { ownerUserId: true } });
+        if (owner?.ownerUserId) {
+          const t = templates.campaignPaymentReceived(
+            campaignId,
+            campaign.name,
+            formatNaira(campaign.priceMinor as bigint),
+            campaign.slotsTotal,
+            campaign.targetReach,
+            reference,
+          );
+          await this.notifications.create(
+            { userId: owner.ownerUserId, type: t.type, title: t.title, body: t.body, data: t.data, dedupeKey: `campaign.payment_received:${reference}` },
+            tx,
+          );
+        }
       });
     }
 

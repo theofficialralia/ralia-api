@@ -477,4 +477,7 @@ export class QuoteDto {
 
   @ApiProperty({ example: 3, description: 'Active targeting filters feeding the multiplier.' })
   active_filters!: number;
+
+  @ApiProperty({ example: 8000, description: 'The verified views this campaign is paid to deliver (slots × reach per slot × posts).' })
+  target_reach!: number;
 }
