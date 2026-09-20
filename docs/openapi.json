@@ -332,6 +332,50 @@
         ]
       }
     },
+    "/v1/auth/google": {
+      "post": {
+        "description": "Verifies a Google ID token and logs the person in, creating the account on first use. 503 if Google sign-in is not configured on the server.",
+        "operationId": "AuthController_google",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleSignInDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Sign in with Google",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/v1/auth/refresh": {
       "post": {
         "description": "Rotates: the presented token is revoked. Replaying an already-revoked token revokes every session for that user.",
@@ -407,6 +451,87 @@
           }
         },
         "summary": "Revoke a refresh token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/password/forgot": {
+      "post": {
+        "description": "Emails a 6-digit reset code (and sends it to any WhatsApp on file). Always returns 202 whether or not the email is registered, so it cannot be used to enumerate accounts.",
+        "operationId": "AuthController_forgotPassword",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgotPasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptedDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Request a password-reset code",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/password/reset": {
+      "post": {
+        "description": "Verifies the reset code and sets the new password. Revokes every existing session on success.",
+        "operationId": "AuthController_resetPassword",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "summary": "Reset a password with the emailed code",
         "tags": [
           "auth"
         ]
@@ -665,6 +790,72 @@
         ]
       }
     },
+    "/v1/promoters/me/channels/{id}/evidence": {
+      "post": {
+        "description": "An insights/analytics screenshot (image, ≤5 MB). Queued for admin review — the verification tier is not self-set.",
+        "operationId": "PromotersController_uploadChannelEvidence",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Upload analytics evidence for a channel",
+        "tags": [
+          "promoters"
+        ]
+      }
+    },
     "/v1/promoters/me/channels/{id}": {
       "delete": {
         "operationId": "PromotersController_removeChannel",
@@ -699,6 +890,88 @@
           }
         ],
         "summary": "Remove a channel",
+        "tags": [
+          "promoters"
+        ]
+      }
+    },
+    "/v1/promoters/me/banks": {
+      "get": {
+        "operationId": "PromotersController_listBanks",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Bank list for the payout dropdown (Paystack)",
+        "tags": [
+          "promoters"
+        ]
+      }
+    },
+    "/v1/promoters/me/bank/resolve": {
+      "get": {
+        "operationId": "PromotersController_resolveBank",
+        "parameters": [
+          {
+            "name": "bank_code",
+            "required": true,
+            "in": "query",
+            "description": "Nigerian bank code.",
+            "schema": {
+              "example": "058",
+              "type": "string"
+            }
+          },
+          {
+            "name": "account_number",
+            "required": true,
+            "in": "query",
+            "description": "NUBAN, 10 digits.",
+            "schema": {
+              "example": "0123456789",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Resolve an account number + bank code to the account name",
         "tags": [
           "promoters"
         ]
@@ -874,6 +1147,53 @@
           }
         ],
         "summary": "List my campaigns",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/v1/campaigns/{id}/duplicate": {
+      "post": {
+        "description": "Clone a past campaign (brief, targeting, creative) into a new draft to review and re-run.",
+        "operationId": "CampaignsController_duplicate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Run again",
         "tags": [
           "campaigns"
         ]
@@ -1060,6 +1380,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteRequestDto"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "",
@@ -1414,6 +1744,64 @@
         ]
       }
     },
+    "/v1/clients/me/logo": {
+      "post": {
+        "description": "Image only (JPG/PNG/WebP/GIF), ≤2 MB. Replaces any existing logo.",
+        "operationId": "ClientsController_uploadLogo",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientProfileDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Upload the business logo",
+        "tags": [
+          "client profile"
+        ]
+      }
+    },
     "/v1/admin/queues/promoters": {
       "get": {
         "operationId": "AdminController_pendingPromoters",
@@ -1440,6 +1828,76 @@
           }
         ],
         "summary": "Promoters awaiting approval",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/promoters": {
+      "get": {
+        "operationId": "AdminController_allPromoters",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "All promoters (directory, any status)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/promoters/{id}": {
+      "get": {
+        "operationId": "AdminController_promoterDetail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "One promoter in full (channels + capability, any status)",
         "tags": [
           "admin"
         ]
@@ -1828,6 +2286,46 @@
         ]
       }
     },
+    "/v1/admin/campaigns/{id}/submissions": {
+      "get": {
+        "description": "Full submission history (pending, approved, rejected) — powers the campaign Submissions tab.",
+        "operationId": "AdminController_campaignSubmissions",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "All proof for one campaign",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/campaigns/{id}/approve": {
       "post": {
         "description": "Moves it to CONFIRMING_PAYMENT; funding makes it LIVE.",
@@ -2150,9 +2648,113 @@
         ]
       }
     },
+    "/v1/admin/channels/{id}/approve": {
+      "post": {
+        "description": "Marks the channel ACTIVE. The promoter is activated on their first approved channel and stays reviewable so the rest can still be approved or rejected.",
+        "operationId": "AdminController_approveChannel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Approve a single channel",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/channels/{id}/reject": {
+      "post": {
+        "description": "Marks the channel REJECTED so it is never matched on and its reach drops out of scoring.",
+        "operationId": "AdminController_rejectChannel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Reject a single channel (reason required)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/submissions/{id}/approve": {
       "post": {
-        "description": "Pays the promoter pro-rata on verified_views, takes Ralia’s cut, and refunds the undelivered remainder to the client — all in one balanced transaction. A delivery below the threshold is refused (reject instead). Requires an Idempotency-Key.",
+        "description": "Pays the promoter pro-rata on verified_views and takes Ralia’s cut on the delivered portion, in one balanced transaction. Any undelivered remainder stays in escrow to fund a reopen (or is retained by the platform at close) — there is no client refund. A delivery below the threshold is refused (reject instead). Requires an Idempotency-Key.",
         "operationId": "AdminController_approveSubmission",
         "parameters": [
           {
@@ -2822,6 +3424,99 @@
         ]
       }
     },
+    "/v1/admin/promoters/{id}/deactivate": {
+      "post": {
+        "description": "Excludes them from matching and blocks sign-in, reversibly.",
+        "operationId": "AdminController_deactivatePromoter",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Deactivate a promoter",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/promoters/{id}/reactivate": {
+      "post": {
+        "operationId": "AdminController_reactivatePromoter",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminDecisionDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Reactivate a promoter",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/rate-config": {
       "get": {
         "description": "The tunable coefficients. Changing them never reprices a quoted campaign.",
@@ -2928,7 +3623,7 @@
     },
     "/v1/admin/team": {
       "get": {
-        "description": "Admins and their capabilities.",
+        "description": "Admins, their capabilities, and pending invites. Any admin may view; managing needs MANAGE_TEAM.",
         "operationId": "AdminController_team",
         "parameters": [
           {
@@ -2990,6 +3685,250 @@
         ]
       }
     },
+    "/v1/admin/team/invites": {
+      "post": {
+        "operationId": "TeamController_invite",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteAdminDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Invite someone to the admin team",
+        "tags": [
+          "admin: team"
+        ]
+      }
+    },
+    "/v1/admin/team/invites/{id}/revoke": {
+      "post": {
+        "operationId": "TeamController_revoke",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Revoke a pending invite",
+        "tags": [
+          "admin: team"
+        ]
+      }
+    },
+    "/v1/admin/team/{userId}/capabilities": {
+      "patch": {
+        "operationId": "TeamController_updateCapabilities",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAdminCapabilitiesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Change an admin's capabilities",
+        "tags": [
+          "admin: team"
+        ]
+      }
+    },
+    "/v1/admin/team/{userId}/suspend": {
+      "post": {
+        "operationId": "TeamController_suspend",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Suspend an admin",
+        "tags": [
+          "admin: team"
+        ]
+      }
+    },
+    "/v1/admin/team/{userId}/reactivate": {
+      "post": {
+        "operationId": "TeamController_reactivate",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Reactivate a suspended admin",
+        "tags": [
+          "admin: team"
+        ]
+      }
+    },
+    "/v1/admin/team/accept": {
+      "post": {
+        "description": "Sets a password, creates/upgrades the admin account, and logs in.",
+        "operationId": "TeamController_accept",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptAdminInviteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Accept an admin invitation",
+        "tags": [
+          "admin: team"
+        ]
+      }
+    },
     "/v1/campaigns/{id}/candidates": {
       "get": {
         "operationId": "MatchingController_candidates",
@@ -3040,6 +3979,43 @@
       }
     },
     "/v1/campaigns/{id}/offers": {
+      "get": {
+        "operationId": "MatchingController_offerRoster",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Offer roster: who was offered, accepted or unanswered, with reach and fit",
+        "tags": [
+          "matching (admin)"
+        ]
+      },
       "post": {
         "operationId": "MatchingController_sendOffers",
         "parameters": [
@@ -3134,6 +4110,45 @@
           }
         ],
         "summary": "My live offers",
+        "tags": [
+          "offers"
+        ]
+      }
+    },
+    "/v1/offers/{id}": {
+      "get": {
+        "operationId": "OffersController_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "One offer — details a promoter reviews before accepting",
         "tags": [
           "offers"
         ]
@@ -3252,6 +4267,46 @@
           }
         ],
         "summary": "My assignments",
+        "tags": [
+          "assignments"
+        ]
+      }
+    },
+    "/v1/assignments/{id}": {
+      "get": {
+        "description": "Everything to act on an accepted assignment: the matched channel, the click-recording tracking link, poster + caption, the earn range, and the latest submission.",
+        "operationId": "AssignmentsController_assignmentDetail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "One assignment in full",
         "tags": [
           "assignments"
         ]
@@ -3436,6 +4491,41 @@
         "summary": "Follow a promoter’s tracking link",
         "tags": [
           "tracking"
+        ]
+      }
+    },
+    "/v1/files/{id}": {
+      "get": {
+        "description": "Streams the object bytes for a File id. Pass ?download=1 to force a download (attachment) instead of inline view.",
+        "operationId": "FilesController_get",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Fetch an uploaded file",
+        "tags": [
+          "files"
         ]
       }
     },
@@ -3829,6 +4919,37 @@
             "example": "Naija Threads",
             "description": "Required when role is CLIENT."
           },
+          "full_name": {
+            "type": "string",
+            "example": "Chidera Okoye",
+            "description": "Promoter full name."
+          },
+          "gender": {
+            "type": "string",
+            "enum": [
+              "MALE",
+              "FEMALE",
+              "OTHER",
+              "PREFER_NOT_TO_SAY"
+            ]
+          },
+          "date_of_birth": {
+            "type": "string",
+            "example": "1998-04-12",
+            "description": "ISO date (YYYY-MM-DD)."
+          },
+          "country": {
+            "type": "string",
+            "example": "Nigeria"
+          },
+          "state": {
+            "type": "string",
+            "example": "Lagos"
+          },
+          "lga": {
+            "type": "string",
+            "example": "Ikeja"
+          },
           "accepted_terms": {
             "type": "boolean",
             "example": true,
@@ -3963,6 +5084,27 @@
           "password"
         ]
       },
+      "GoogleSignInDto": {
+        "type": "object",
+        "properties": {
+          "id_token": {
+            "type": "string",
+            "description": "The Google ID token (JWT) from Google Identity Services."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "CLIENT",
+              "PROMOTER"
+            ],
+            "description": "Which kind of account to create on first sign-in."
+          }
+        },
+        "required": [
+          "id_token",
+          "role"
+        ]
+      },
       "RefreshDto": {
         "type": "object",
         "properties": {
@@ -3972,6 +5114,45 @@
         },
         "required": [
           "refresh_token"
+        ]
+      },
+      "ForgotPasswordDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "ada@example.com",
+            "description": "The account email. We send a reset code to it (and any WhatsApp on file)."
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
+      "ResetPasswordDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "ada@example.com"
+          },
+          "code": {
+            "type": "string",
+            "example": "123456",
+            "minLength": 6,
+            "maxLength": 6,
+            "description": "The 6-digit code from the reset email."
+          },
+          "new_password": {
+            "type": "string",
+            "minLength": 10,
+            "description": "The new password."
+          }
+        },
+        "required": [
+          "email",
+          "code",
+          "new_password"
         ]
       },
       "MeDto": {
@@ -4005,7 +5186,8 @@
               "type": "string",
               "enum": [
                 "REVIEW_EVIDENCE",
-                "RECORD_MONEY"
+                "RECORD_MONEY",
+                "MANAGE_TEAM"
               ]
             }
           },
@@ -4056,7 +5238,8 @@
               "PROFILE_INCOMPLETE",
               "AWAITING_APPROVAL",
               "REJECTED",
-              "ACTIVE"
+              "ACTIVE",
+              "SUSPENDED"
             ]
           },
           "full_name": {
@@ -4448,7 +5631,8 @@
           },
           "destination_url": {
             "type": "string",
-            "example": "https://naijathreads.example/shop"
+            "example": "https://naijathreads.example/shop",
+            "description": "Where clicks are sent. Required for click-driven objectives; optional for AWARENESS (views-only)."
           },
           "slots_total": {
             "type": "number",
@@ -4456,12 +5640,38 @@
             "minimum": 1,
             "maximum": 500,
             "description": "How many promoter slots."
+          },
+          "starts_at": {
+            "type": "string",
+            "example": "2026-09-01",
+            "description": "When the campaign should go live (client-facing window start). ISO date."
+          },
+          "ends_at": {
+            "type": "string",
+            "example": "2026-09-14",
+            "description": "When the campaign run ends (client-facing expectation). ISO date. Promoter deadlines are set a contingency buffer BEFORE this."
+          },
+          "cadence": {
+            "type": "string",
+            "enum": [
+              "ONE_OFF",
+              "DAILY",
+              "WEEKLY",
+              "CUSTOM"
+            ],
+            "description": "How posts are spaced over the run window. ONE_OFF = a single post."
+          },
+          "posts_required": {
+            "type": "number",
+            "example": 7,
+            "minimum": 1,
+            "maximum": 90,
+            "description": "Posts each promoter delivers over the window (1 = one-off)."
           }
         },
         "required": [
           "name",
           "objective",
-          "destination_url",
           "slots_total"
         ]
       },
@@ -4481,6 +5691,110 @@
         "required": [
           "amount_minor",
           "amount_display"
+        ]
+      },
+      "RoleConfigDto": {
+        "type": "object",
+        "properties": {
+          "content_type": {
+            "type": "string",
+            "example": "Educate (How to)"
+          },
+          "task_mode": {
+            "type": "string",
+            "enum": [
+              "ONLINE",
+              "OFFLINE"
+            ]
+          },
+          "task_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "budget_bucket": {
+            "type": "string",
+            "example": "₦1M – ₦2M"
+          },
+          "following_size": {
+            "type": "string",
+            "example": "50k – 100k"
+          },
+          "audience_reach": {
+            "type": "string",
+            "example": "50k – 100k"
+          }
+        }
+      },
+      "CampaignTargetingView": {
+        "type": "object",
+        "properties": {
+          "states": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "lgas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "age_min": {
+            "type": "object",
+            "nullable": true
+          },
+          "age_max": {
+            "type": "object",
+            "nullable": true
+          },
+          "genders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "languages": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "platforms": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "min_effective_reach": {
+            "type": "number"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "states",
+          "lgas",
+          "age_min",
+          "age_max",
+          "genders",
+          "languages",
+          "categories",
+          "platforms",
+          "min_effective_reach",
+          "roles"
         ]
       },
       "CampaignDto": {
@@ -4556,6 +5870,59 @@
             "type": "object",
             "nullable": true,
             "format": "date-time"
+          },
+          "starts_at": {
+            "type": "object",
+            "nullable": true,
+            "format": "date",
+            "description": "Client-facing run window start."
+          },
+          "ends_at": {
+            "type": "object",
+            "nullable": true,
+            "format": "date",
+            "description": "Client-facing run window end (the client expectation). Promoter deadlines sit a contingency buffer before this."
+          },
+          "cadence": {
+            "type": "string",
+            "enum": [
+              "ONE_OFF",
+              "DAILY",
+              "WEEKLY",
+              "CUSTOM"
+            ],
+            "description": "How posts are spaced over the run window."
+          },
+          "posts_required": {
+            "type": "number",
+            "description": "Posts each promoter delivers over the window (1 = one-off)."
+          },
+          "role_config": {
+            "nullable": true,
+            "description": "Per-role task detail from Targeting.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RoleConfigDto"
+              }
+            ]
+          },
+          "needs_creative": {
+            "type": "boolean",
+            "description": "Whether the client asked Ralia to design the creative."
+          },
+          "design_brief": {
+            "type": "object",
+            "nullable": true,
+            "description": "Design request when needs_creative is true."
+          },
+          "targeting": {
+            "nullable": true,
+            "description": "Present on the single-campaign fetch — lets the client resume a draft.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CampaignTargetingView"
+              }
+            ]
           }
         },
         "required": [
@@ -4605,6 +5972,45 @@
             "example": 12,
             "minimum": 1,
             "maximum": 500
+          },
+          "role_config": {
+            "$ref": "#/components/schemas/RoleConfigDto"
+          },
+          "needs_creative": {
+            "type": "boolean",
+            "description": "True when the client asked Ralia to design the creative."
+          },
+          "design_brief": {
+            "type": "string",
+            "example": "A bold poster for our zobo launch.",
+            "description": "Design request when needs_creative is true."
+          },
+          "starts_at": {
+            "type": "string",
+            "example": "2026-09-01",
+            "description": "When the campaign should go live (client-facing window start). ISO date."
+          },
+          "ends_at": {
+            "type": "string",
+            "example": "2026-09-14",
+            "description": "When the campaign run ends (client-facing expectation). ISO date. Promoter deadlines are set a contingency buffer BEFORE this."
+          },
+          "cadence": {
+            "type": "string",
+            "enum": [
+              "ONE_OFF",
+              "DAILY",
+              "WEEKLY",
+              "CUSTOM"
+            ],
+            "description": "How posts are spaced over the run window. ONE_OFF = a single post."
+          },
+          "posts_required": {
+            "type": "number",
+            "example": 7,
+            "minimum": 1,
+            "maximum": 90,
+            "description": "Posts each promoter delivers over the window (1 = one-off)."
           }
         }
       },
@@ -4705,6 +6111,16 @@
           }
         }
       },
+      "QuoteRequestDto": {
+        "type": "object",
+        "properties": {
+          "price_minor": {
+            "type": "number",
+            "example": 120000,
+            "description": "Exact campaign price in kobo to freeze. Must clear the category floor."
+          }
+        }
+      },
       "QuoteDto": {
         "type": "object",
         "properties": {
@@ -4736,10 +6152,15 @@
             "type": "number",
             "example": 12
           },
+          "posts_required": {
+            "type": "number",
+            "example": 1,
+            "description": "Posts each promoter delivers over the run window."
+          },
           "estimated_reach": {
             "type": "number",
             "example": 2400,
-            "description": "Sum of effective reach across eligible promoters (estimate)."
+            "description": "Sum of effective reach across eligible promoters × posts (estimate)."
           },
           "eligible_promoters": {
             "type": "number",
@@ -4750,6 +6171,11 @@
             "type": "number",
             "example": 3,
             "description": "Active targeting filters feeding the multiplier."
+          },
+          "target_reach": {
+            "type": "number",
+            "example": 8000,
+            "description": "The verified views this campaign is paid to deliver (slots × reach per slot × posts)."
           }
         },
         "required": [
@@ -4757,23 +6183,30 @@
           "unit_price",
           "promoter_fee",
           "slots_total",
+          "posts_required",
           "estimated_reach",
           "eligible_promoters",
-          "active_filters"
+          "active_filters",
+          "target_reach"
         ]
       },
       "PlanRequestDto": {
         "type": "object",
         "properties": {
+          "price_minor": {
+            "type": "number",
+            "example": 120000,
+            "description": "Exact campaign price in kobo — charged as-is; solves for reach and promoter count."
+          },
           "budget_minor": {
             "type": "number",
             "example": 500000,
-            "description": "Budget in kobo — solves for how many slots it buys."
+            "description": "Legacy: budget in kobo — solves for how many whole slots it buys."
           },
           "slots": {
             "type": "number",
             "example": 12,
-            "description": "Slot count — prices that many slots directly."
+            "description": "Legacy: slot count — prices that many slots directly."
           }
         }
       },
@@ -4792,6 +6225,11 @@
             "type": "number",
             "example": 12,
             "description": "Slots this plan buys."
+          },
+          "posts_required": {
+            "type": "number",
+            "example": 1,
+            "description": "Posts each promoter delivers per slot (folded into unit_price)."
           },
           "total_price": {
             "description": "Total price = unit_price × slots.",
@@ -4818,15 +6256,79 @@
             "type": "number",
             "example": 24000,
             "description": "Estimated total reach = slots × reach_per_slot."
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "DISTRIBUTION",
+              "CREATION"
+            ],
+            "description": "The campaign's pricing category, derived from its targeted role."
+          },
+          "floor_minor": {
+            "description": "Minimum campaign fee for this category — the slider floor.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MoneyDto"
+              }
+            ]
+          },
+          "min_slots": {
+            "type": "number",
+            "example": 5,
+            "description": "Fewest slots that meet the category floor at the current unit price."
+          },
+          "meets_floor": {
+            "type": "boolean",
+            "example": false,
+            "description": "Whether this plan meets the category floor (total ≥ floor)."
+          },
+          "default_reach_per_slot": {
+            "type": "number",
+            "example": 1000,
+            "description": "Category default reach per slot the wizard pre-fills."
+          },
+          "default_promoters": {
+            "type": "number",
+            "example": 5,
+            "description": "Category default promoter count the wizard pre-fills."
           }
         },
         "required": [
           "unit_price",
           "slots",
+          "posts_required",
           "total_price",
           "promoter_fee",
           "reach_per_slot",
-          "estimated_total_reach"
+          "estimated_total_reach",
+          "category",
+          "floor_minor",
+          "min_slots",
+          "meets_floor",
+          "default_reach_per_slot",
+          "default_promoters"
+        ]
+      },
+      "ClientSocialDto": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "example": "INSTAGRAM",
+            "description": "Platform key (e.g. WHATSAPP, INSTAGRAM, X, TIKTOK, FACEBOOK)."
+          },
+          "url": {
+            "type": "string",
+            "example": "instagram.com/skinsmith"
+          },
+          "followers": {
+            "type": "number",
+            "example": 4200
+          }
+        },
+        "required": [
+          "platform"
         ]
       },
       "ClientProfileDto": {
@@ -4875,6 +6377,18 @@
             "type": "object",
             "nullable": true
           },
+          "socials": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientSocialDto"
+            }
+          },
+          "logo_url": {
+            "type": "object",
+            "nullable": true,
+            "description": "URL of the business logo, or null. Served by /v1/files/:id."
+          },
           "status": {
             "type": "string",
             "example": "ACTIVE"
@@ -4892,6 +6406,8 @@
           "support_contact_name",
           "support_contact_phone",
           "description",
+          "socials",
+          "logo_url",
           "status"
         ]
       },
@@ -4933,6 +6449,13 @@
           "description": {
             "type": "string",
             "example": "A couple of sentences about what you do."
+          },
+          "socials": {
+            "description": "Social channels the business is on.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientSocialDto"
+            }
           }
         }
       },
@@ -4964,6 +6487,10 @@
           "reason": {
             "type": "string",
             "example": "Screenshot does not show the campaign creative."
+          },
+          "terminal": {
+            "type": "boolean",
+            "description": "Campaign reject only: true rejects it terminally (cancelled, not resubmittable); false/omitted lets the owner correct and resubmit."
           }
         },
         "required": [
@@ -5235,7 +6762,7 @@
             ]
           },
           "client_wallet": {
-            "description": "Refunded remainders sitting in client wallets.",
+            "description": "Legacy client-wallet balance — always ₦0 now that under-deliveries are retained by the platform, not refunded.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/MoneyDto"
@@ -5299,11 +6826,51 @@
           "rpm_minor": {
             "type": "number",
             "example": 3000,
-            "description": "RPM — kobo per 1,000 effective views."
+            "description": "Legacy flat RPM — kobo per 1,000 effective views (fallback)."
+          },
+          "rpm_distribution_minor": {
+            "type": "number",
+            "example": 300000,
+            "description": "Distribution RPM — kobo per 1,000 effective views."
+          },
+          "rpm_creation_minor": {
+            "type": "number",
+            "example": 50000,
+            "description": "Creation/Participation RPM — kobo per 1,000 effective views."
+          },
+          "floor_distribution_minor": {
+            "type": "number",
+            "example": 1500000,
+            "description": "Distribution minimum campaign fee, kobo."
+          },
+          "floor_creation_minor": {
+            "type": "number",
+            "example": 10000000,
+            "description": "Creation/Participation minimum campaign fee, kobo."
+          },
+          "default_reach_distribution": {
+            "type": "number",
+            "example": 1000,
+            "description": "Distribution default reach per slot."
+          },
+          "default_reach_creation": {
+            "type": "number",
+            "example": 10000,
+            "description": "Creation/Participation default reach per slot."
+          },
+          "default_promoters_distribution": {
+            "type": "number",
+            "example": 5,
+            "description": "Distribution default promoter count."
+          },
+          "default_promoters_creation": {
+            "type": "number",
+            "example": 20,
+            "description": "Creation/Participation default promoter count."
           },
           "take_rate_pct": {
             "type": "number",
-            "example": 30,
+            "example": 50,
             "description": "Ralia take rate, whole percent."
           },
           "delivery_threshold_pct": {
@@ -5331,12 +6898,90 @@
             "example": 24,
             "description": "Offer accept window, hours."
           },
+          "delivery_window_hours": {
+            "type": "number",
+            "example": 48,
+            "description": "Flat delivery window (hours) for campaigns with no end date."
+          },
+          "contingency_buffer_hours": {
+            "type": "number",
+            "example": 24,
+            "description": "Contingency buffer (hours): the promoter deadline sits this far before the client run-window end."
+          },
           "withdrawal_minimum_minor": {
             "type": "number",
             "example": 500000,
             "description": "Minimum withdrawal, kobo."
           }
         }
+      },
+      "InviteAdminDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "newadmin@ralia.co"
+          },
+          "capabilities": {
+            "type": "array",
+            "example": [
+              "REVIEW_EVIDENCE"
+            ],
+            "items": {
+              "type": "string",
+              "enum": [
+                "REVIEW_EVIDENCE",
+                "RECORD_MONEY",
+                "MANAGE_TEAM"
+              ]
+            }
+          }
+        },
+        "required": [
+          "email",
+          "capabilities"
+        ]
+      },
+      "UpdateAdminCapabilitiesDto": {
+        "type": "object",
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "example": [
+              "REVIEW_EVIDENCE",
+              "RECORD_MONEY"
+            ],
+            "items": {
+              "type": "string",
+              "enum": [
+                "REVIEW_EVIDENCE",
+                "RECORD_MONEY",
+                "MANAGE_TEAM"
+              ]
+            }
+          }
+        },
+        "required": [
+          "capabilities"
+        ]
+      },
+      "AcceptAdminInviteDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The token from the invite link."
+          },
+          "password": {
+            "type": "string",
+            "example": "a long enough passphrase",
+            "minLength": 10
+          }
+        },
+        "required": [
+          "token",
+          "password"
+        ]
       },
       "CandidateChannelDto": {
         "type": "object",
@@ -5459,6 +7104,11 @@
             "example": 2415,
             "description": "What the promoter earns, in kobo."
           },
+          "promised_reach": {
+            "type": "number",
+            "example": 1000,
+            "description": "The target views this offer is priced for — what the promoter is expected to reach."
+          },
           "expires_at": {
             "type": "string",
             "format": "date-time"
@@ -5478,6 +7128,7 @@
           "campaign_name",
           "role",
           "fee_minor",
+          "promised_reach",
           "expires_at",
           "status",
           "fit_pct"
@@ -5646,8 +7297,18 @@
           },
           "views": {
             "type": "number",
+            "example": 842,
+            "description": "The views this promoter reported on their post — admin-verified once approved, otherwise the promoter’s own figure (see views_verified)."
+          },
+          "views_verified": {
+            "type": "boolean",
+            "example": true,
+            "description": "True when `views` is the admin-verified figure; false when it is still the promoter’s reported number, pending review."
+          },
+          "clicks": {
+            "type": "number",
             "example": 3210,
-            "description": "Non-bot clicks on this promoter’s link."
+            "description": "Non-bot clicks the platform recorded on this promoter’s tracking link — a separate signal from the post’s view count."
           },
           "verdict": {
             "type": "string",
@@ -5679,6 +7340,8 @@
           "platform",
           "submitted_at",
           "views",
+          "views_verified",
+          "clicks",
           "verdict",
           "auto_flag",
           "public_url",
@@ -5758,6 +7421,16 @@
             "type": "number",
             "example": 60
           },
+          "target_reach": {
+            "type": "number",
+            "example": 60000,
+            "description": "Total effective reach the client paid for."
+          },
+          "success_rate_pct": {
+            "type": "number",
+            "example": 103,
+            "description": "Verified reach delivered ÷ target, as a percent (can exceed 100)."
+          },
           "evidence": {
             "type": "array",
             "items": {
@@ -5781,6 +7454,8 @@
           "acceptance_rate",
           "completed",
           "slots_total",
+          "target_reach",
+          "success_rate_pct",
           "evidence"
         ]
       },
@@ -5824,6 +7499,12 @@
           "assignment_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "delivery_slot_id": {
+            "type": "object",
+            "format": "uuid",
+            "nullable": true,
+            "description": "The scheduled post this proof answers."
           },
           "verdict": {
             "type": "string",

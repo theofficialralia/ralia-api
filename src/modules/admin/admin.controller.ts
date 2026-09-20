@@ -248,7 +248,7 @@ export class AdminController {
   @RequiresIdempotencyKey()
   @ApiOperation({
     summary: 'Approve proof and settle the promoter pro-rata',
-    description: 'Pays the promoter pro-rata on verified_views, takes Ralia’s cut, and refunds the undelivered remainder to the client — all in one balanced transaction. A delivery below the threshold is refused (reject instead). Requires an Idempotency-Key.',
+    description: 'Pays the promoter pro-rata on verified_views and takes Ralia’s cut on the delivered portion, in one balanced transaction. Any undelivered remainder stays in escrow to fund a reopen (or is retained by the platform at close) — there is no client refund. A delivery below the threshold is refused (reject instead). Requires an Idempotency-Key.',
   })
   @ApiOkResponse({ type: AdminDecisionDto })
   approveSubmission(
