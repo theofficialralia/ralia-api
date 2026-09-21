@@ -1,5 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { LeaderboardConfigService } from './leaderboard-config.service';
+import { LeaderboardController } from './leaderboard.controller';
 import { LeaderboardScheduler } from './leaderboard.scheduler';
 import { LeaderboardService } from './leaderboard.service';
 import { PointsService } from './points.service';
@@ -11,6 +12,7 @@ import { PointsService } from './points.service';
  */
 @Global()
 @Module({
+  controllers: [LeaderboardController],
   providers: [PointsService, LeaderboardConfigService, LeaderboardService, LeaderboardScheduler],
   exports: [PointsService, LeaderboardConfigService, LeaderboardService],
 })

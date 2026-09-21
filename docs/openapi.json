@@ -33,6 +33,92 @@
         ]
       }
     },
+    "/v1/leaderboard": {
+      "get": {
+        "description": "Top promoters this season plus the caller’s own ranked row.",
+        "operationId": "LeaderboardController_board",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeaderboardDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "The season leaderboard",
+        "tags": [
+          "leaderboard"
+        ]
+      }
+    },
+    "/v1/leaderboard/me": {
+      "get": {
+        "description": "Points, rank, tier + progress to the next tier, streak, and a breakdown of how points were earned this season.",
+        "operationId": "LeaderboardController_me",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyScoreDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "My score",
+        "tags": [
+          "leaderboard"
+        ]
+      }
+    },
     "/v1/notifications": {
       "get": {
         "description": "Newest first, with the unread count for a badge.",
@@ -4827,6 +4913,204 @@
         "required": [
           "status",
           "db"
+        ]
+      },
+      "LeaderboardRowDto": {
+        "type": "object",
+        "properties": {
+          "rank": {
+            "type": "number",
+            "example": 1
+          },
+          "display_name": {
+            "type": "string",
+            "example": "Ada O.",
+            "description": "Privacy-preserving display name (first name + last initial)."
+          },
+          "points": {
+            "type": "number",
+            "example": 640
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "BRONZE",
+              "SILVER",
+              "GOLD",
+              "PLATINUM"
+            ]
+          },
+          "is_me": {
+            "type": "boolean",
+            "example": false,
+            "description": "True for the viewer’s own row."
+          }
+        },
+        "required": [
+          "rank",
+          "display_name",
+          "points",
+          "tier",
+          "is_me"
+        ]
+      },
+      "LeaderboardDto": {
+        "type": "object",
+        "properties": {
+          "season": {
+            "type": "string",
+            "example": "S5",
+            "description": "The current season key."
+          },
+          "total": {
+            "type": "number",
+            "example": 128,
+            "description": "How many promoters have a score this season."
+          },
+          "top": {
+            "description": "The top promoters this season, ranked.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeaderboardRowDto"
+            }
+          },
+          "me": {
+            "nullable": true,
+            "description": "The viewer’s own row, if they have a score this season.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LeaderboardRowDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "season",
+          "total",
+          "top",
+          "me"
+        ]
+      },
+      "NextTierDto": {
+        "type": "object",
+        "properties": {
+          "tier": {
+            "type": "string",
+            "enum": [
+              "BRONZE",
+              "SILVER",
+              "GOLD",
+              "PLATINUM"
+            ]
+          },
+          "points_to_go": {
+            "type": "number",
+            "example": 160,
+            "description": "Rolling-90 points still needed to reach it."
+          }
+        },
+        "required": [
+          "tier",
+          "points_to_go"
+        ]
+      },
+      "PointBreakdownDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "DELIVERY_COMPLETED",
+              "DELIVERED_ON_TIME",
+              "OVER_DELIVERY",
+              "QUALITY_CLEAN",
+              "STREAK_BONUS",
+              "BREADTH_BONUS",
+              "MILESTONE",
+              "PENALTY_NO_SHOW",
+              "PENALTY_REJECTED",
+              "PENALTY_DUPLICATE",
+              "REVERSAL",
+              "ADJUSTMENT"
+            ]
+          },
+          "points": {
+            "type": "number",
+            "example": 300
+          }
+        },
+        "required": [
+          "type",
+          "points"
+        ]
+      },
+      "MyScoreDto": {
+        "type": "object",
+        "properties": {
+          "season": {
+            "type": "string",
+            "example": "S5"
+          },
+          "season_points": {
+            "type": "number",
+            "example": 640
+          },
+          "lifetime_points": {
+            "type": "number",
+            "example": 1820
+          },
+          "rolling_90_points": {
+            "type": "number",
+            "example": 640,
+            "description": "Points in the trailing 90 days — the metric tiers are based on."
+          },
+          "rank": {
+            "type": "object",
+            "example": 4,
+            "nullable": true,
+            "description": "Rank this season, or null with no score yet."
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "BRONZE",
+              "SILVER",
+              "GOLD",
+              "PLATINUM"
+            ]
+          },
+          "next_tier": {
+            "nullable": true,
+            "description": "The next tier up and how far off it is, or null at the top.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NextTierDto"
+              }
+            ]
+          },
+          "streak": {
+            "type": "number",
+            "example": 5,
+            "description": "Consecutive on-time deliveries."
+          },
+          "breakdown": {
+            "description": "This season’s points grouped by how they were earned.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PointBreakdownDto"
+            }
+          }
+        },
+        "required": [
+          "season",
+          "season_points",
+          "lifetime_points",
+          "rolling_90_points",
+          "rank",
+          "tier",
+          "next_tier",
+          "streak",
+          "breakdown"
         ]
       },
       "NotificationDto": {

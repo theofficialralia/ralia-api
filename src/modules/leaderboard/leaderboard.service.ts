@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { LeaderboardConfig, PrismaClient, PromoterTier } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { categoryForRole } from '../../common/pricing/pricing';
 import { LeaderboardConfigService } from './leaderboard-config.service';
@@ -7,6 +7,24 @@ import { PointsService } from './points.service';
 import { deliveryAwards } from './points-rules';
 import { seasonKeyFor } from './season';
 import { tierFor } from './tier';
+import { LeaderboardDto, LeaderboardRowDto, MyScoreDto, NextTierDto } from './dto/leaderboard.dto';
+
+/** Privacy-preserving display name: first name + last initial (e.g. "Ada O."). */
+function displayName(fullName: string | null): string {
+  if (!fullName?.trim()) return 'Promoter';
+  const parts = fullName.trim().split(/\s+/);
+  const first = parts[0] ?? 'Promoter';
+  const last = parts.length > 1 ? parts[parts.length - 1] : undefined;
+  return last ? `${first} ${last.charAt(0).toUpperCase()}.` : first;
+}
+
+/** The next tier up and the rolling-90 points still needed, or null at the top. */
+function nextTierProgress(tier: PromoterTier, rolling90: number, config: LeaderboardConfig): NextTierDto | null {
+  if (tier === 'BRONZE') return { tier: 'SILVER', points_to_go: Math.max(0, config.tierSilverAt - rolling90) };
+  if (tier === 'SILVER') return { tier: 'GOLD', points_to_go: Math.max(0, config.tierGoldAt - rolling90) };
+  if (tier === 'GOLD') return { tier: 'PLATINUM', points_to_go: Math.max(0, config.tierPlatinumAt - rolling90) };
+  return null;
+}
 
 type Tx = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
 
@@ -111,6 +129,93 @@ export class LeaderboardService {
 
     this.logger.log(`Leaderboard rebuilt: ${promoters.length} promoters, ${scores.length} ranked (${seasonKey}).`);
     return { promoters: promoters.length, ranked: scores.length };
+  }
+
+  // ── Reads (promoter-facing, Phase 3) ─────────────────────
+
+  private async displayNames(ids: string[]): Promise<Map<string, string>> {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return new Map();
+    const profiles = await this.prisma.promoterProfile.findMany({
+      where: { userId: { in: unique } },
+      select: { userId: true, fullName: true },
+    });
+    return new Map(profiles.map((p) => [p.userId, displayName(p.fullName)]));
+  }
+
+  /** The season board: the top promoters (live order by season points) plus the
+   *  viewer's own ranked row. */
+  async board(viewerId: string, limit: number, now: Date = new Date()): Promise<LeaderboardDto> {
+    const seasonKey = await this.config.currentSeasonKey(now);
+    const [rows, total, mine] = await Promise.all([
+      this.prisma.promoterScore.findMany({
+        where: { seasonKey },
+        orderBy: [{ seasonPoints: 'desc' }, { updatedAt: 'asc' }],
+        take: limit,
+        select: { promoterId: true, seasonPoints: true, tier: true },
+      }),
+      this.prisma.promoterScore.count({ where: { seasonKey } }),
+      this.prisma.promoterScore.findUnique({
+        where: { promoterId: viewerId },
+        select: { promoterId: true, seasonKey: true, seasonPoints: true, tier: true },
+      }),
+    ]);
+
+    const inSeason = mine?.seasonKey === seasonKey ? mine : null;
+    const names = await this.displayNames([...rows.map((r) => r.promoterId), ...(inSeason ? [inSeason.promoterId] : [])]);
+
+    const top: LeaderboardRowDto[] = rows.map((r, i) => ({
+      rank: i + 1,
+      display_name: names.get(r.promoterId) ?? 'Promoter',
+      points: r.seasonPoints,
+      tier: r.tier,
+      is_me: r.promoterId === viewerId,
+    }));
+
+    let me: LeaderboardRowDto | null = null;
+    if (inSeason) {
+      const better = await this.prisma.promoterScore.count({ where: { seasonKey, seasonPoints: { gt: inSeason.seasonPoints } } });
+      me = { rank: better + 1, display_name: names.get(inSeason.promoterId) ?? 'You', points: inSeason.seasonPoints, tier: inSeason.tier, is_me: true };
+    }
+
+    return { season: seasonKey, total, top, me };
+  }
+
+  /** The viewer's own score card: totals, rank, tier + progress, streak, breakdown. */
+  async myScore(promoterId: string, now: Date = new Date()): Promise<MyScoreDto> {
+    const config = await this.config.getActive();
+    const seasonKey = seasonKeyFor(now, config.seasonLengthDays);
+    const [score, breakdownRaw] = await Promise.all([
+      this.prisma.promoterScore.findUnique({ where: { promoterId } }),
+      this.prisma.pointEvent.groupBy({ by: ['type'], where: { promoterId, seasonKey }, _sum: { points: true } }),
+    ]);
+
+    const inSeason = score?.seasonKey === seasonKey ? score : null;
+    const rolling90 = score?.rolling90Points ?? 0;
+    const tier = score?.tier ?? 'BRONZE';
+
+    let rank: number | null = null;
+    if (inSeason) {
+      const better = await this.prisma.promoterScore.count({ where: { seasonKey, seasonPoints: { gt: inSeason.seasonPoints } } });
+      rank = better + 1;
+    }
+
+    const breakdown = breakdownRaw
+      .map((b) => ({ type: b.type, points: b._sum.points ?? 0 }))
+      .filter((b) => b.points !== 0)
+      .sort((a, b) => b.points - a.points);
+
+    return {
+      season: seasonKey,
+      season_points: inSeason?.seasonPoints ?? 0,
+      lifetime_points: score?.lifetimePoints ?? 0,
+      rolling_90_points: rolling90,
+      rank,
+      tier,
+      next_tier: nextTierProgress(tier, rolling90, config),
+      streak: score?.streak ?? 0,
+      breakdown,
+    };
   }
 
   /**

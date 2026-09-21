@@ -355,11 +355,15 @@ Admin app:
       DELIVERY awards for approved submissions and rebuild — idempotent. Specs cover
       rollup, tier + reliability floor, streak, rolling-90 decay, and ranking/snapshots.
 
-### Phase 3 — Promoter-facing
-- [ ] `GET /v1/leaderboard` + `GET /v1/promoters/me/score` endpoints + DTOs.
-- [ ] Promoter app: leaderboard screen (top N, own rank, movement, season countdown) and
-      a "your score" card (points, tier, progress to next tier, how-points-work).
-- [ ] Decide name/handle privacy (opt-in vs. anonymized) before shipping the public board.
+### Phase 3 — Promoter-facing ✅ done
+- [x] `GET /v1/leaderboard` (top N + caller's ranked row) and `GET /v1/leaderboard/me`
+      (points, rank, tier + progress to next tier, streak, point breakdown) + DTOs.
+      `LeaderboardService.board`/`myScore`; specs cover both.
+- [x] Promoter app: `/leaderboard` screen — a "your score" card (tier badge, season/
+      all-time points, rank, streak, progress bar to next tier, point breakdown) and the
+      ranked season board with the viewer's row pinned. Nav entry added (sidebar + mobile).
+- [x] Privacy: names are shown as **first name + last initial** ("Ada O."), not full
+      names — a privacy-preserving default. (Swap to opt-in handles later if desired.)
 
 ### Phase 4 — Admin & config
 - [ ] Admin Settings: edit `leaderboard_config` (point values, multipliers, caps, season

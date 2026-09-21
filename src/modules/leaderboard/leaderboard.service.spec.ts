@@ -36,11 +36,11 @@ describe('LeaderboardService (Phase 2)', () => {
     await prisma.$executeRawUnsafe('TRUNCATE point_events, promoter_scores, leaderboard_snapshots, promoter_profiles, users RESTART IDENTITY CASCADE');
   });
 
-  async function makePromoter(reliability = 0.9): Promise<string> {
+  async function makePromoter(reliability = 0.9, fullName: string | null = null): Promise<string> {
     const u = await prisma.user.create({
       data: { email: `p${seq++}@a.co`, phoneE164: `+23491${String(seq).padStart(8, '0')}`, passwordHash: 'x', status: 'ACTIVE', roles: { create: { role: Role.PROMOTER } } },
     });
-    await prisma.promoterProfile.create({ data: { userId: u.id, status: PromoterStatus.ACTIVE, reliability } });
+    await prisma.promoterProfile.create({ data: { userId: u.id, status: PromoterStatus.ACTIVE, reliability, fullName } });
     return u.id;
   }
 
@@ -120,5 +120,35 @@ describe('LeaderboardService (Phase 2)', () => {
     const snap = await prisma.leaderboardSnapshot.findMany({ where: { seasonKey: SEASON, scope: 'GLOBAL' }, orderBy: { rank: 'asc' } });
     expect(snap.map((r) => r.promoterId)).toEqual([a, b]);
     expect(snap[0]?.points).toBe(400);
+  });
+
+  it('board returns the ranked top with privacy-preserving names and the viewer’s row', async () => {
+    const a = await makePromoter(0.9, 'Ada Okafor');
+    const b = await makePromoter(0.9, 'Ben Lawal');
+    await event(a, 'ADJUSTMENT', 400, NOW);
+    await event(b, 'ADJUSTMENT', 100, NOW);
+    await service.recomputeScore(a, NOW);
+    await service.recomputeScore(b, NOW);
+
+    const board = await service.board(a, 10, NOW);
+    expect(board.season).toBe(SEASON);
+    expect(board.total).toBe(2);
+    expect(board.top[0]).toMatchObject({ rank: 1, display_name: 'Ada O.', points: 400, is_me: true });
+    expect(board.top[1]).toMatchObject({ rank: 2, display_name: 'Ben L.', is_me: false });
+    expect(board.me).toMatchObject({ rank: 1, points: 400, is_me: true });
+  });
+
+  it('myScore reports rank, tier, progress to next tier, and a breakdown', async () => {
+    const a = await makePromoter(0.9, 'Ada Okafor');
+    await event(a, 'DELIVERY_COMPLETED', 300, NOW);
+    await event(a, 'OVER_DELIVERY', 100, NOW);
+    await service.recomputeScore(a, NOW);
+
+    const me = await service.myScore(a, NOW);
+    expect(me.season_points).toBe(400);
+    expect(me.rank).toBe(1);
+    expect(me.tier).toBe('SILVER'); // 400 ≥ silver (300)
+    expect(me.next_tier).toMatchObject({ tier: 'GOLD', points_to_go: 400 }); // 800 − 400
+    expect(me.breakdown.map((b) => b.type)).toEqual(['DELIVERY_COMPLETED', 'OVER_DELIVERY']);
   });
 });
