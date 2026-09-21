@@ -119,6 +119,45 @@
         ]
       }
     },
+    "/v1/leaderboard/rules": {
+      "get": {
+        "description": "The current point values — what earns and what costs points — for a promoter-facing explainer.",
+        "operationId": "LeaderboardController_rules",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PointRulesDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "How points work",
+        "tags": [
+          "leaderboard"
+        ]
+      }
+    },
     "/v1/notifications": {
       "get": {
         "description": "Newest first, with the unread count for a badge.",
@@ -5233,6 +5272,61 @@
           "next_tier",
           "streak",
           "breakdown"
+        ]
+      },
+      "PointRulesDto": {
+        "type": "object",
+        "properties": {
+          "delivery_completed": {
+            "type": "number",
+            "example": 50,
+            "description": "Points for an approved delivery."
+          },
+          "on_time": {
+            "type": "number",
+            "example": 20,
+            "description": "Bonus for delivering on time."
+          },
+          "quality_clean": {
+            "type": "number",
+            "example": 15,
+            "description": "Bonus for a clean (non-duplicate) proof."
+          },
+          "over_delivery_max": {
+            "type": "number",
+            "example": 60,
+            "description": "Maximum bonus for over-delivering (at the cap ratio)."
+          },
+          "over_cap_ratio": {
+            "type": "number",
+            "example": 3,
+            "description": "Over-delivery is rewarded up to this many times the target."
+          },
+          "penalty_no_show": {
+            "type": "number",
+            "example": 40,
+            "description": "Points lost for a missed post."
+          },
+          "penalty_rejected": {
+            "type": "number",
+            "example": 20,
+            "description": "Points lost for a rejected submission."
+          },
+          "penalty_duplicate": {
+            "type": "number",
+            "example": 30,
+            "description": "Points lost for a duplicate proof."
+          }
+        },
+        "required": [
+          "delivery_completed",
+          "on_time",
+          "quality_clean",
+          "over_delivery_max",
+          "over_cap_ratio",
+          "penalty_no_show",
+          "penalty_rejected",
+          "penalty_duplicate"
         ]
       },
       "NotificationDto": {
