@@ -328,14 +328,17 @@ Admin app:
       epoch → `S{n}`, or `ALL` when length ≤ 0). Specs cover award idempotency, tx
       enlistment, and season bucketing.
 
-### Phase 1 — Earn points from existing hooks
-- [ ] Emit awards from `approveSubmission`: `DELIVERY_COMPLETED`, `DELIVERED_ON_TIME`,
-      `OVER_DELIVERY` (§4), `QUALITY_CLEAN`, `STREAK_BONUS`, difficulty multiplier,
-      per-campaign cap. Same tx as settlement.
-- [ ] Emit penalties from the reclaim sweep + `rejectSubmission`: `PENALTY_NO_SHOW`,
-      `PENALTY_REJECTED`, `PENALTY_DUPLICATE`.
-- [ ] Emit `MILESTONE` awards from onboarding / channel verification / first campaign.
-- [ ] `REVERSAL` when an approved submission is later reversed.
+### Phase 1 — Earn points from existing hooks 🟡 mostly done
+- [x] Emit awards from `approveSubmission`: `DELIVERY_COMPLETED`, `DELIVERED_ON_TIME`,
+      `OVER_DELIVERY` (§4), `QUALITY_CLEAN`, difficulty multiplier, per-campaign cap —
+      in the same tx as settlement (`points-rules.ts` + `PointsService.award`). Specs
+      cover the maths, the cap, and an approval awarding points end-to-end.
+- [x] Emit penalties: `PENALTY_NO_SHOW` (reclaim sweep, both forfeit + reallocate
+      branches), `PENALTY_REJECTED` + `PENALTY_DUPLICATE` (`rejectSubmission`).
+- [ ] `STREAK_BONUS` — deferred to Phase 2 (needs the running on-time streak counter,
+      which `promoter_scores.streak` maintains).
+- [ ] `MILESTONE` awards (onboarding / channel verification / first campaign) — deferred.
+- [ ] `REVERSAL` — deferred (no trigger yet; approved submissions aren't un-approved).
 
 ### Phase 2 — Aggregate & rank
 - [ ] Per-event light update of the acting promoter's `PromoterScore`

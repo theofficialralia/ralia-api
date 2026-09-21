@@ -32,6 +32,9 @@ import { formatNaira, toMoney } from '../ledger/money';
 import { NotificationService } from '../notifications/notification.service';
 import { templates } from '../notifications/notification-templates';
 import { ScoringService } from '../scoring/scoring.service';
+import { PointsService } from '../leaderboard/points.service';
+import { LeaderboardConfigService } from '../leaderboard/leaderboard-config.service';
+import { deliveryAwards, applyCampaignCap } from '../leaderboard/points-rules';
 import { AuditService } from './audit.service';
 import { AdminDecisionDto, GatewayPaymentDto, RateConfigUpdateDto, ReconciliationReportDto } from './dto/admin.dto';
 
@@ -55,6 +58,8 @@ export class AdminService {
     private readonly scoring: ScoringService,
     private readonly allocation: AllocationService,
     private readonly notifications: NotificationService,
+    private readonly points: PointsService,
+    private readonly leaderboardConfig: LeaderboardConfigService,
     @Inject(STORAGE) private readonly storage: StorageProvider,
   ) {}
 
@@ -532,6 +537,28 @@ export class AdminService {
       // revenue after the tx commits (retainCampaignRemainder runs its own tx).
       let finalizeRemainder = false;
 
+      // §leaderboard (Phase 1) — the points this approval earns, resolved before the tx
+      // (pure config + a read of the campaign's prior positive points for the cap) and
+      // written inside the same tx as the payout, so a promoter is never paid without
+      // the record of what they earned. Over-delivery is where effort is rewarded (§4).
+      const lbConfig = await this.leaderboardConfig.getActive();
+      const lbSeasonKey = await this.leaderboardConfig.currentSeasonKey(now);
+      const priorAgg = await this.prisma.pointEvent.aggregate({
+        where: { promoterId: assignment.promoterId, campaignId: campaign.id, points: { gt: 0 } },
+        _sum: { points: true },
+      });
+      const pointAwards = applyCampaignCap(
+        deliveryAwards(lbConfig, {
+          verified: verifiedViews,
+          promised: reachBasis,
+          onTime: deliveredOnTime,
+          autoFlag: submission.autoFlag,
+          isCreation: reopenCategory === 'CREATION',
+        }),
+        priorAgg._sum.points ?? 0,
+        lbConfig.perCampaignPointCap,
+      );
+
       await this.prisma.$transaction(async (tx) => {
         await tx.submission.update({
           where: { id: submissionId },
@@ -556,6 +583,23 @@ export class AdminService {
           now,
           tx,
         );
+        // §leaderboard — award the pre-computed points (idempotent per submission).
+        for (const a of pointAwards) {
+          await this.points.award(
+            {
+              promoterId: assignment.promoterId,
+              type: a.type,
+              points: a.points,
+              dedupeKey: `${a.type}:${submissionId}`,
+              seasonKey: lbSeasonKey,
+              submissionId,
+              assignmentId: assignment.id,
+              campaignId: campaign.id,
+              occurredAt: now,
+            },
+            tx,
+          );
+        }
         // Notify in the same tx as the payout — the promoter must never be paid
         // without the record of why.
         await this.notifications.create(
@@ -735,6 +779,10 @@ export class AdminService {
       : AssignmentStatus.REJECTED;
 
     const now = new Date();
+    // §leaderboard — penalties for a rejected proof (and a duplicate flag), resolved
+    // before the tx and written inside it alongside the trust ding.
+    const lbConfig = await this.leaderboardConfig.getActive();
+    const lbSeasonKey = await this.leaderboardConfig.currentSeasonKey(now);
     await this.prisma.$transaction(async (tx) => {
       await tx.submission.update({
         where: { id: submissionId },
@@ -752,6 +800,17 @@ export class AdminService {
       // A rejected submission dings trust (−6, §4). The assignment stays open, so
       // this does not touch the completed/reliability counts.
       await this.scoring.recordDeliveryOutcome(submission.assignment.promoterId, 'REJECTED', now, tx);
+      // §leaderboard — dock points for the rejection, and again if it was a duplicate.
+      await this.points.award(
+        { promoterId: submission.assignment.promoterId, type: 'PENALTY_REJECTED', points: -lbConfig.penaltyRejected, dedupeKey: `PENALTY_REJECTED:${submissionId}`, seasonKey: lbSeasonKey, submissionId, assignmentId: submission.assignmentId, campaignId: submission.assignment.campaignId, occurredAt: now },
+        tx,
+      );
+      if (submission.autoFlag) {
+        await this.points.award(
+          { promoterId: submission.assignment.promoterId, type: 'PENALTY_DUPLICATE', points: -lbConfig.penaltyDuplicate, dedupeKey: `PENALTY_DUPLICATE:${submissionId}`, seasonKey: lbSeasonKey, submissionId, assignmentId: submission.assignmentId, campaignId: submission.assignment.campaignId, occurredAt: now },
+          tx,
+        );
+      }
       await this.notifications.create(
         {
           userId: submission.assignment.promoterId,

@@ -343,6 +343,27 @@ describe('admin — decisions, money and audit', () => {
     expect(reopened?.body).toMatch(/matching new promoters/i);
   });
 
+  it('awards leaderboard points on approval, including over-delivery', async () => {
+    const { submissionId, promoterId, campaignId, adminId } = await makePendingSubmission();
+    // Verified 2000 vs promised 1000 = 2x over-delivery.
+    await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: 2000 }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+
+    const events = await prisma.pointEvent.findMany({ where: { promoterId, campaignId } });
+    const byType = new Map(events.map((e) => [e.type, e.points]));
+    expect(byType.get('DELIVERY_COMPLETED')).toBe(50);
+    expect(byType.get('OVER_DELIVERY')).toBe(30); // overBase 30 × (2 − 1)
+    expect(byType.has('QUALITY_CLEAN')).toBe(true);
+    // One award per type per submission (dedupe on the point ledger).
+    expect(await prisma.pointEvent.count({ where: { promoterId, campaignId, type: 'DELIVERY_COMPLETED' } })).toBe(1);
+  });
+
+  it('docks leaderboard points when a submission is rejected', async () => {
+    const { submissionId, promoterId, adminId } = await makePendingSubmission();
+    await http().post(`/admin/submissions/${submissionId}/reject`).send({ reason: 'Screenshot is cropped.' }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+    const penalty = await prisma.pointEvent.findFirst({ where: { promoterId, type: 'PENALTY_REJECTED' } });
+    expect(penalty?.points).toBe(-20);
+  });
+
   it('a delivery below the threshold is refused and moves no money', async () => {
     const { submissionId, promoterId, adminId } = await makePendingSubmission();
 

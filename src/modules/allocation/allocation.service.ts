@@ -7,6 +7,8 @@ import { DEFAULT_SCORING_CONFIG, overOfferCount } from '../../common/scoring/sco
 import { MatchingService } from '../matching/matching.service';
 import { NotificationService } from '../notifications/notification.service';
 import { ScoringService } from '../scoring/scoring.service';
+import { PointsService } from '../leaderboard/points.service';
+import { LeaderboardConfigService } from '../leaderboard/leaderboard-config.service';
 
 /** Delivery-slot states a promoter can still act on — the ones a missed deadline forfeits. */
 const RECLAIMABLE_SLOT: DeliverySlotStatus[] = [DeliverySlotStatus.PENDING, DeliverySlotStatus.REJECTED];
@@ -43,6 +45,8 @@ export class AllocationService {
     private readonly matching: MatchingService,
     private readonly rateConfig: RateConfigService,
     private readonly notifications: NotificationService,
+    private readonly points: PointsService,
+    private readonly leaderboardConfig: LeaderboardConfigService,
   ) {}
 
   /**
@@ -194,6 +198,10 @@ export class AllocationService {
    * (lifetime PAID/CANCELLED) reflects the assignment's settled state.
    */
   private async reconcileAfterMisses(assignmentId: string, missedThisSweep: number, now: Date): Promise<boolean> {
+    // §leaderboard — the no-show penalty for this sweep, resolved before the tx.
+    const lbConfig = await this.leaderboardConfig.getActive();
+    const lbSeasonKey = await this.leaderboardConfig.currentSeasonKey(now);
+    const noShowPoints = -lbConfig.penaltyNoShow * missedThisSweep;
     return this.prisma.$transaction(async (tx) => {
       const assignment = await tx.assignment.findUnique({
         where: { id: assignmentId },
@@ -221,6 +229,12 @@ export class AllocationService {
         for (let i = 0; i < missedThisSweep; i++) {
           await this.scoring.recordDeliveryOutcome(assignment.promoterId, 'NO_SHOW', now, tx);
         }
+        // §leaderboard — dock points for the missed post(s), keyed to the miss count so
+        // a repeated sweep never double-penalises.
+        await this.points.award(
+          { promoterId: assignment.promoterId, type: 'PENALTY_NO_SHOW', points: noShowPoints, dedupeKey: `PENALTY_NO_SHOW:${assignmentId}:${slotViews.filter((v) => v.status === 'MISSED').length}`, seasonKey: lbSeasonKey, assignmentId, campaignId: assignment.campaignId, occurredAt: now },
+          tx,
+        );
         await this.notifications.create(
           {
             userId: assignment.promoterId,
@@ -262,6 +276,12 @@ export class AllocationService {
       for (let i = 0; i < missedThisSweep; i++) {
         await this.scoring.recordDeliveryOutcome(assignment.promoterId, 'NO_SHOW', now, tx);
       }
+      // §leaderboard — dock points; the assignment is now CANCELLED (terminal), so a
+      // single per-assignment key is idempotent across sweeps.
+      await this.points.award(
+        { promoterId: assignment.promoterId, type: 'PENALTY_NO_SHOW', points: noShowPoints, dedupeKey: `PENALTY_NO_SHOW:${assignmentId}:cancel`, seasonKey: lbSeasonKey, assignmentId, campaignId: assignment.campaignId, occurredAt: now },
+        tx,
+      );
       const oneOff = totalPosts === 1;
       await this.notifications.create(
         {

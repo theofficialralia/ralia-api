@@ -13,8 +13,10 @@ import { AuditService } from './audit.service';
 import { TeamController } from './team.controller';
 import { TeamService } from './team.service';
 
+import { LeaderboardModule } from '../leaderboard/leaderboard.module';
+
 @Module({
-  imports: [LedgerModule, RateConfigModule, StorageModule, ScoringModule, AllocationModule, NotificationModule, IdentityModule, MailerModule],
+  imports: [LedgerModule, RateConfigModule, LeaderboardModule, StorageModule, ScoringModule, AllocationModule, NotificationModule, IdentityModule, MailerModule],
   controllers: [AdminController, TeamController],
   providers: [AdminService, AuditService, TeamService],
   exports: [AuditService],
