@@ -5918,6 +5918,16 @@
             "example": "https://naijathreads.example/shop",
             "description": "Where clicks are sent. Required for click-driven objectives; optional for AWARENESS (views-only)."
           },
+          "min_tier": {
+            "type": "string",
+            "enum": [
+              "BRONZE",
+              "SILVER",
+              "GOLD",
+              "PLATINUM"
+            ],
+            "description": "Restrict this campaign to promoters at or above a leaderboard tier. Omit for open-to-all."
+          },
           "slots_total": {
             "type": "number",
             "example": 12,
@@ -6128,6 +6138,17 @@
           "destination_url": {
             "type": "object"
           },
+          "min_tier": {
+            "type": "string",
+            "enum": [
+              "BRONZE",
+              "SILVER",
+              "GOLD",
+              "PLATINUM"
+            ],
+            "nullable": true,
+            "description": "Minimum promoter tier eligible for this campaign, or null for open-to-all."
+          },
           "slots_total": {
             "type": "number"
           },
@@ -6217,6 +6238,7 @@
           "description",
           "promoter_instructions",
           "destination_url",
+          "min_tier",
           "slots_total",
           "slots_filled",
           "price",
@@ -6250,6 +6272,16 @@
           "destination_url": {
             "type": "string",
             "example": "https://naijathreads.example/shop"
+          },
+          "min_tier": {
+            "type": "string",
+            "enum": [
+              "BRONZE",
+              "SILVER",
+              "GOLD",
+              "PLATINUM"
+            ],
+            "description": "Restrict to promoters at or above a tier. Omit to leave unchanged."
           },
           "slots_total": {
             "type": "number",

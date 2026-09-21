@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Cadence, Campaign, CampaignStatus, Prisma, PromoterRole } from '@prisma/client';
+import { Cadence, Campaign, CampaignStatus, Prisma, PromoterRole, PromoterTier } from '@prisma/client';
 import { buildEligibility } from '../../common/eligibility/eligibility';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { RateConfigService } from '../../common/rate-config/rate-config.service';
@@ -77,6 +77,7 @@ export class CampaignsService {
         description: dto.description ?? null,
         promoterInstructions: dto.promoter_instructions ?? null,
         destinationUrl: dto.destination_url ?? null,
+        minTier: dto.min_tier ?? null,
         status: CampaignStatus.DRAFT,
         // budget is only known once priced; 0 until a quote is accepted.
         budgetMinor: 0n,
@@ -183,6 +184,7 @@ export class CampaignsService {
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.promoter_instructions !== undefined) data.promoterInstructions = dto.promoter_instructions;
     if (dto.destination_url !== undefined) data.destinationUrl = dto.destination_url;
+    if (dto.min_tier !== undefined) data.minTier = dto.min_tier;
     if (dto.slots_total !== undefined) data.slotsTotal = dto.slots_total;
     if (dto.role_config !== undefined) data.roleConfig = dto.role_config as unknown as Prisma.InputJsonValue;
     if (dto.needs_creative !== undefined) data.needsCreative = dto.needs_creative;
@@ -323,7 +325,7 @@ export class CampaignsService {
 
     const { promoterFeeMinor } = splitFee(unitPrice, config);
 
-    const { count, reach } = await this.estimateEligible(filters);
+    const { count, reach } = await this.estimateEligible(filters, campaign.minTier);
 
     // Materialise the priced slots — the concurrency-safe units B5 reserves
     // against. Safe to delete and recreate here: a campaign is only quotable
@@ -467,9 +469,9 @@ export class CampaignsService {
 
   // ── Eligibility estimate (stage-1 of §5.3; the full ranked query is B5) ──
 
-  private async estimateEligible(filters: TargetingFilters): Promise<{ count: number; reach: number }> {
+  private async estimateEligible(filters: TargetingFilters, minTier: PromoterTier | null = null): Promise<{ count: number; reach: number }> {
     const config = await this.rateConfig.getActive();
-    const { channelWhere, profileWhere } = buildEligibility(filters, config.minTrustScore);
+    const { channelWhere, profileWhere } = buildEligibility(filters, config.minTrustScore, minTier);
 
     const eligible = await this.prisma.promoterProfile.findMany({
       where: profileWhere,
@@ -507,6 +509,7 @@ export class CampaignsService {
       description: campaign.description,
       promoter_instructions: campaign.promoterInstructions,
       destination_url: campaign.destinationUrl,
+      min_tier: campaign.minTier,
       slots_total: campaign.slotsTotal,
       slots_filled: campaign.slotsFilled,
       price: campaign.priceMinor === null ? null : toMoney(campaign.priceMinor),

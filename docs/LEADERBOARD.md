@@ -370,11 +370,16 @@ Admin app:
       length, tier thresholds) — mirror the rate-config screen.
 - [ ] Admin: manual `ADJUSTMENT` action (capability-gated, audited).
 
-### Phase 5 — Tiers & gating (the future step)
-- [ ] Enforce `Campaign.minTier` in `buildEligibility` (matching).
-- [ ] Campaign-creation / admin UI to set `min_tier` on a campaign.
-- [ ] Tier perks: tier-based `maxCampaignsPerWeek`, matching-rank boost (config-driven).
-- [ ] Tier demotion with a grace period.
+### Phase 5 — Tiers & gating 🟡 gate done
+- [x] Enforce `Campaign.minTier` in `buildEligibility` (matching candidates + the quote's
+      eligible-count estimate). Below-tier promoters are filtered out. Spec covers it.
+- [x] Set `min_tier` on a campaign: accepted on create/update (`CreateCampaignDto` /
+      `UpdateCampaignDto`), returned on the campaign, and a "Minimum promoter tier"
+      selector in the client wizard's targeting step (Any / Silver+ / Gold+ / Platinum),
+      shown in the fund summary and restored on resume.
+- [ ] Tier perks: tier-based `maxCampaignsPerWeek`, matching-rank boost — deferred.
+- [ ] Tier demotion with a grace period — deferred (today rolling-90 decay drops a tier
+      as soon as points age out; a grace period would soften that).
 
 ### Cross-cutting
 - [ ] Specs: points maths (§4), idempotency/reversal, tier derivation, the matching gate.

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { AssetKind, Cadence, CampaignObjective, CampaignStatus, PromoterRole } from '@prisma/client';
+import { AssetKind, Cadence, CampaignObjective, CampaignStatus, PromoterRole, PromoterTier } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -86,6 +86,11 @@ export class CreateCampaignDto {
   @MaxLength(400)
   destination_url?: string;
 
+  @ApiPropertyOptional({ enum: PromoterTier, description: 'Restrict this campaign to promoters at or above a leaderboard tier. Omit for open-to-all.' })
+  @IsOptional()
+  @IsEnum(PromoterTier)
+  min_tier?: PromoterTier;
+
   @ApiProperty({ example: 12, minimum: 1, maximum: 500, description: 'How many promoter slots.' })
   @IsInt()
   @Min(1)
@@ -145,6 +150,11 @@ export class UpdateCampaignDto {
   @IsUrl({ require_protocol: true })
   @MaxLength(400)
   destination_url?: string;
+
+  @ApiPropertyOptional({ enum: PromoterTier, description: 'Restrict to promoters at or above a tier. Omit to leave unchanged.' })
+  @IsOptional()
+  @IsEnum(PromoterTier)
+  min_tier?: PromoterTier;
 
   @ApiPropertyOptional({ example: 12, minimum: 1, maximum: 500 })
   @IsOptional()
@@ -308,6 +318,9 @@ export class CampaignDto {
 
   @ApiProperty()
   destination_url!: string | null;
+
+  @ApiProperty({ enum: PromoterTier, nullable: true, description: 'Minimum promoter tier eligible for this campaign, or null for open-to-all.' })
+  min_tier!: PromoterTier | null;
 
   @ApiProperty()
   slots_total!: number;

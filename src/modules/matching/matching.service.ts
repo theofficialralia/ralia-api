@@ -100,7 +100,7 @@ export class MatchingService {
     // per-category RPM the slot's unitPrice was frozen at (§2/§7).
     const slotRole = campaign.slots[0]?.role;
     const pricing = await this.rateConfig.getPricingConfig(slotRole ? categoryForRole(slotRole) : undefined);
-    const { channelWhere, profileWhere } = buildEligibility(filters, rate.minTrustScore);
+    const { channelWhere, profileWhere } = buildEligibility(filters, rate.minTrustScore, campaign.minTier);
     const ctx = this.scoringContext(campaign, filters, pricing);
 
     // Exclude anyone already offered this campaign (any status) — the unique

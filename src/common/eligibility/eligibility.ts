@@ -1,5 +1,11 @@
-import { ChannelStatus, Prisma, PromoterStatus } from '@prisma/client';
+import { ChannelStatus, Prisma, PromoterStatus, PromoterTier } from '@prisma/client';
 import { TargetingFilters } from '../pricing/pricing';
+
+const TIER_ORDER: PromoterTier[] = ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'];
+/** The tiers at or above `min` — the eligible set for a tier-gated campaign. */
+function tiersAtOrAbove(min: PromoterTier): PromoterTier[] {
+  return TIER_ORDER.slice(TIER_ORDER.indexOf(min));
+}
 
 /**
  * The §5.3 stage-1 hard filter, as Prisma where-clauses. One definition, used by
@@ -15,6 +21,7 @@ import { TargetingFilters } from '../pricing/pricing';
 export function buildEligibility(
   filters: TargetingFilters,
   minTrustScore: number,
+  minTier: PromoterTier | null = null,
 ): { channelWhere: Prisma.ChannelWhereInput; profileWhere: Prisma.PromoterProfileWhereInput } {
   const channelWhere: Prisma.ChannelWhereInput = {
     status: ChannelStatus.ACTIVE,
@@ -26,6 +33,9 @@ export function buildEligibility(
   const profileWhere: Prisma.PromoterProfileWhereInput = {
     status: PromoterStatus.ACTIVE,
     trustScore: { gte: minTrustScore },
+    // Tier gate (docs/LEADERBOARD.md §9): a campaign may restrict itself to promoters
+    // at or above a tier. The tier is cached on the profile by the leaderboard scheduler.
+    ...(minTier ? { tier: { in: tiersAtOrAbove(minTier) } } : {}),
     ...(filters.states.length > 0 ? { locationState: { in: filters.states } } : {}),
     ...(filters.ageMin !== null ? { age: { gte: filters.ageMin } } : {}),
     ...(filters.ageMax !== null ? { age: { lte: filters.ageMax } } : {}),
