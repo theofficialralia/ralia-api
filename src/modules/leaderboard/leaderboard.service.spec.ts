@@ -139,6 +139,14 @@ describe('LeaderboardService (Phase 2)', () => {
     expect(board.me).toMatchObject({ rank: 1, points: 400, is_me: true });
   });
 
+  it('rules exposes the live point values (over-delivery max = base × (cap − 1))', async () => {
+    const r = await service.rules();
+    expect(r.delivery_completed).toBe(50);
+    expect(r.on_time).toBe(20);
+    expect(r.over_delivery_max).toBe(60); // overBase 30 × (overCapRatio 3 − 1)
+    expect(r.penalty_no_show).toBe(40);
+  });
+
   it('myScore reports rank, tier, progress to next tier, and a breakdown', async () => {
     const a = await makePromoter(0.9, 'Ada Okafor');
     await event(a, 'DELIVERY_COMPLETED', 300, NOW);

@@ -129,6 +129,33 @@ export class LeaderboardConfigUpdateDto {
   @ApiPropertyOptional({ example: 0.8 }) @IsOptional() @IsNumber() @Min(0) @Max(1) tier_reliability_floor?: number;
 }
 
+/** Promoter-facing "how points work" values, from the live config. */
+export class PointRulesDto {
+  @ApiProperty({ example: 50, description: 'Points for an approved delivery.' })
+  delivery_completed!: number;
+
+  @ApiProperty({ example: 20, description: 'Bonus for delivering on time.' })
+  on_time!: number;
+
+  @ApiProperty({ example: 15, description: 'Bonus for a clean (non-duplicate) proof.' })
+  quality_clean!: number;
+
+  @ApiProperty({ example: 60, description: 'Maximum bonus for over-delivering (at the cap ratio).' })
+  over_delivery_max!: number;
+
+  @ApiProperty({ example: 3, description: 'Over-delivery is rewarded up to this many times the target.' })
+  over_cap_ratio!: number;
+
+  @ApiProperty({ example: 40, description: 'Points lost for a missed post.' })
+  penalty_no_show!: number;
+
+  @ApiProperty({ example: 20, description: 'Points lost for a rejected submission.' })
+  penalty_rejected!: number;
+
+  @ApiProperty({ example: 30, description: 'Points lost for a duplicate proof.' })
+  penalty_duplicate!: number;
+}
+
 export class AdjustPointsDto {
   @ApiProperty({ example: 100, description: 'Points to award (positive) or dock (negative).' })
   @IsInt()

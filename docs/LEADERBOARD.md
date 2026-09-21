@@ -364,6 +364,10 @@ Admin app:
       ranked season board with the viewer's row pinned. Nav entry added (sidebar + mobile).
 - [x] Privacy: names are shown as **first name + last initial** ("Ada O."), not full
       names — a privacy-preserving default. (Swap to opt-in handles later if desired.)
+- [x] Transparency: `GET /v1/leaderboard/rules` returns the live point values; the
+      leaderboard screen has a **"How points work"** panel (earn vs. lose), and the proof
+      **submission screen** nudges the promoter — showing their target and that beating it
+      (once verified) earns bonus points.
 
 ### Phase 4 — Admin & config ✅ done
 - [x] `GET/PATCH /admin/leaderboard-config` (capability-gated, audited) + a **Leaderboard**

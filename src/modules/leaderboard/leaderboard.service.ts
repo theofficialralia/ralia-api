@@ -133,6 +133,21 @@ export class LeaderboardService {
 
   // ── Reads (promoter-facing, Phase 3) ─────────────────────
 
+  /** The point values, for a promoter-facing "how points work" panel. */
+  async rules(): Promise<import('./dto/leaderboard.dto').PointRulesDto> {
+    const c = await this.config.getActive();
+    return {
+      delivery_completed: c.ptsDeliveryCompleted,
+      on_time: c.ptsOnTime,
+      quality_clean: c.ptsQualityClean,
+      over_delivery_max: c.overBase * (c.overCapRatio - 1),
+      over_cap_ratio: c.overCapRatio,
+      penalty_no_show: c.penaltyNoShow,
+      penalty_rejected: c.penaltyRejected,
+      penalty_duplicate: c.penaltyDuplicate,
+    };
+  }
+
   private async displayNames(ids: string[]): Promise<Map<string, string>> {
     const unique = [...new Set(ids)];
     if (unique.length === 0) return new Map();

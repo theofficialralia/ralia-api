@@ -4,7 +4,7 @@ import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swa
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { AuthedUser } from '../../common/auth/jwt-auth.guard';
 import { Roles } from '../../common/auth/roles.guard';
-import { LeaderboardDto, MyScoreDto } from './dto/leaderboard.dto';
+import { LeaderboardDto, MyScoreDto, PointRulesDto } from './dto/leaderboard.dto';
 import { LeaderboardService } from './leaderboard.service';
 
 @ApiTags('leaderboard')
@@ -29,5 +29,12 @@ export class LeaderboardController {
   @ApiOkResponse({ type: MyScoreDto })
   me(@CurrentUser() user: AuthedUser): Promise<MyScoreDto> {
     return this.leaderboard.myScore(user.id);
+  }
+
+  @Get('rules')
+  @ApiOperation({ summary: 'How points work', description: 'The current point values — what earns and what costs points — for a promoter-facing explainer.' })
+  @ApiOkResponse({ type: PointRulesDto })
+  rules(): Promise<PointRulesDto> {
+    return this.leaderboard.rules();
   }
 }
