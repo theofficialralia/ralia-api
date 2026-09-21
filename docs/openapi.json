@@ -3714,6 +3714,53 @@
         ]
       }
     },
+    "/v1/admin/leaderboard": {
+      "get": {
+        "description": "Full season standings — real names, season + lifetime points, tier and streak, ranked.",
+        "operationId": "AdminController_leaderboard",
+        "parameters": [
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Required on mutating money endpoints. A UUID the client generates per intent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminLeaderboardDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Promoter leaderboard",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/leaderboard-config": {
       "get": {
         "description": "The tunable point values, multipliers, caps, season length and tier thresholds.",
@@ -7446,6 +7493,78 @@
             "description": "Minimum withdrawal, kobo."
           }
         }
+      },
+      "AdminLeaderboardRowDto": {
+        "type": "object",
+        "properties": {
+          "rank": {
+            "type": "number",
+            "example": 1
+          },
+          "promoter_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "full_name": {
+            "type": "object",
+            "nullable": true,
+            "example": "Ada Okafor"
+          },
+          "season_points": {
+            "type": "number",
+            "example": 640
+          },
+          "lifetime_points": {
+            "type": "number",
+            "example": 1820
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "BRONZE",
+              "SILVER",
+              "GOLD",
+              "PLATINUM"
+            ]
+          },
+          "streak": {
+            "type": "number",
+            "example": 5
+          }
+        },
+        "required": [
+          "rank",
+          "promoter_id",
+          "full_name",
+          "season_points",
+          "lifetime_points",
+          "tier",
+          "streak"
+        ]
+      },
+      "AdminLeaderboardDto": {
+        "type": "object",
+        "properties": {
+          "season": {
+            "type": "string",
+            "example": "S5"
+          },
+          "total": {
+            "type": "number",
+            "example": 128
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminLeaderboardRowDto"
+            }
+          }
+        },
+        "required": [
+          "season",
+          "total",
+          "rows"
+        ]
       },
       "LeaderboardConfigUpdateDto": {
         "type": "object",

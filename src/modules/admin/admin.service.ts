@@ -1924,6 +1924,11 @@ export class AdminService {
 
   // ── Leaderboard config + manual adjustments (Phase 4) ─────
 
+  /** The full promoter leaderboard for the admin console (real names). */
+  async promoterLeaderboard(limit = 100) {
+    return this.leaderboard.adminBoard(Math.min(Math.max(limit, 1), 500));
+  }
+
   async leaderboardSettings() {
     const c = await this.leaderboardConfig.getActive();
     return {

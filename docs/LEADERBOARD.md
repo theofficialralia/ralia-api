@@ -376,6 +376,9 @@ Admin app:
 - [x] `POST /admin/promoters/:id/points` — a manual `ADJUSTMENT` (award or dock, audited,
       recomputes the score) + an "Adjust points" modal on the admin promoter detail.
       Admin specs cover the config update and the adjustment.
+- [x] `GET /admin/leaderboard` — the full season standings with **real names**, season +
+      lifetime points, tier and streak (not privacy-masked). A **Leaderboard** page in the
+      admin console (searchable table, tier badges). Spec covers the ranking.
 
 ### Phase 5 — Tiers & gating 🟡 gate done
 - [x] Enforce `Campaign.minTier` in `buildEligibility` (matching candidates + the quote's

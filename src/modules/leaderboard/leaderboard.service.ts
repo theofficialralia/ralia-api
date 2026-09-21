@@ -133,6 +133,39 @@ export class LeaderboardService {
 
   // ── Reads (promoter-facing, Phase 3) ─────────────────────
 
+  /** The full season standings for admins — real names, season + lifetime points,
+   *  tier and streak, ranked. Not privacy-masked (admin-only). */
+  async adminBoard(limit: number, now: Date = new Date()): Promise<import('./dto/leaderboard.dto').AdminLeaderboardDto> {
+    const seasonKey = await this.config.currentSeasonKey(now);
+    const [scores, total] = await Promise.all([
+      this.prisma.promoterScore.findMany({
+        where: { seasonKey },
+        orderBy: [{ seasonPoints: 'desc' }, { updatedAt: 'asc' }],
+        take: limit,
+        select: { promoterId: true, seasonPoints: true, lifetimePoints: true, tier: true, streak: true },
+      }),
+      this.prisma.promoterScore.count({ where: { seasonKey } }),
+    ]);
+    const profiles = await this.prisma.promoterProfile.findMany({
+      where: { userId: { in: scores.map((s) => s.promoterId) } },
+      select: { userId: true, fullName: true },
+    });
+    const nameOf = new Map(profiles.map((p) => [p.userId, p.fullName]));
+    return {
+      season: seasonKey,
+      total,
+      rows: scores.map((s, i) => ({
+        rank: i + 1,
+        promoter_id: s.promoterId,
+        full_name: nameOf.get(s.promoterId) ?? null,
+        season_points: s.seasonPoints,
+        lifetime_points: s.lifetimePoints,
+        tier: s.tier,
+        streak: s.streak,
+      })),
+    };
+  }
+
   /** The point values, for a promoter-facing "how points work" panel. */
   async rules(): Promise<import('./dto/leaderboard.dto').PointRulesDto> {
     const c = await this.config.getActive();

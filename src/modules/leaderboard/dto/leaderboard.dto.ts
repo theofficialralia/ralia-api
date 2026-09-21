@@ -78,6 +78,24 @@ export class MyScoreDto {
   breakdown!: PointBreakdownDto[];
 }
 
+// ── Admin board (full standings) ─────────────────────────────
+
+export class AdminLeaderboardRowDto {
+  @ApiProperty({ example: 1 }) rank!: number;
+  @ApiProperty({ format: 'uuid' }) promoter_id!: string;
+  @ApiProperty({ nullable: true, example: 'Ada Okafor' }) full_name!: string | null;
+  @ApiProperty({ example: 640 }) season_points!: number;
+  @ApiProperty({ example: 1820 }) lifetime_points!: number;
+  @ApiProperty({ enum: PromoterTier }) tier!: PromoterTier;
+  @ApiProperty({ example: 5 }) streak!: number;
+}
+
+export class AdminLeaderboardDto {
+  @ApiProperty({ example: 'S5' }) season!: string;
+  @ApiProperty({ example: 128 }) total!: number;
+  @ApiProperty({ type: [AdminLeaderboardRowDto] }) rows!: AdminLeaderboardRowDto[];
+}
+
 // ── Admin config (Phase 4) ───────────────────────────────────
 
 /** The tunable leaderboard_config, as the admin sees and edits it (snake_case). */

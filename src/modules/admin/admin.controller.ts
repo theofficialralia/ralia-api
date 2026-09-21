@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, DefaultValuePipe, Get, Headers, HttpCode, HttpStatus, Param, ParseIntPipe, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { AdminCapability, ClientOrgStatus, Role } from '@prisma/client';
 import { ApiBearerAuth, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
@@ -7,7 +7,7 @@ import { RequiresCapability, Roles } from '../../common/auth/roles.guard';
 import { RequiresIdempotencyKey } from '../../common/idempotency/idempotency.guard';
 import { AdminService } from './admin.service';
 import { AdminDecisionDto, ApproveSubmissionDto, ExposureReportDto, FundCampaignDto, RateConfigUpdateDto, ReconciliationReportDto, RecordWithdrawalPaidDto, RejectDto, SetCapabilityDto, SetKycDto, SettleGatewayPaymentDto, VerifyChannelDto } from './dto/admin.dto';
-import { AdjustPointsDto, LeaderboardConfigUpdateDto } from '../leaderboard/dto/leaderboard.dto';
+import { AdjustPointsDto, AdminLeaderboardDto, LeaderboardConfigUpdateDto } from '../leaderboard/dto/leaderboard.dto';
 
 /**
  * Admin console API.
@@ -443,6 +443,14 @@ export class AdminController {
   @ApiOperation({ summary: 'Update platform rules', description: 'Only the fields sent change. Audited.' })
   updateRateConfig(@CurrentUser() admin: AuthedUser, @Body() dto: RateConfigUpdateDto) {
     return this.admin.updateRateConfig(admin.id, dto);
+  }
+
+  @Get('leaderboard')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Promoter leaderboard', description: 'Full season standings — real names, season + lifetime points, tier and streak, ranked.' })
+  @ApiOkResponse({ type: AdminLeaderboardDto })
+  leaderboard(@Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit: number) {
+    return this.admin.promoterLeaderboard(limit);
   }
 
   @Get('leaderboard-config')

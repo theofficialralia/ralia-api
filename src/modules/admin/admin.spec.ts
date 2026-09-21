@@ -914,6 +914,20 @@ describe('admin — decisions, money and audit', () => {
     expect(await prisma.auditLog.count({ where: { action: 'rate_config.update' } })).toBe(1);
   });
 
+  it('shows the promoter leaderboard, ranked, with real names', async () => {
+    const adminId = await makeAdmin();
+    const a = await makePromoter();
+    const b = await makePromoter();
+    await prisma.promoterProfile.update({ where: { userId: a }, data: { fullName: 'Ada Okafor' } });
+    await http().post(`/admin/promoters/${a}/points`).set(bearer(adminId, [Role.ADMIN])).send({ points: 400, reason: 'seed a' }).expect(201);
+    await http().post(`/admin/promoters/${b}/points`).set(bearer(adminId, [Role.ADMIN])).send({ points: 100, reason: 'seed b' }).expect(201);
+
+    const res = await http().get('/admin/leaderboard').set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect(res.body.total).toBe(2);
+    expect(res.body.rows[0]).toMatchObject({ rank: 1, promoter_id: a, full_name: 'Ada Okafor', season_points: 400 });
+    expect(res.body.rows[1]).toMatchObject({ rank: 2, promoter_id: b, season_points: 100 });
+  });
+
   it('reads and updates leaderboard rules, and audits the change', async () => {
     const adminId = await makeAdmin();
     const before = await http().get('/admin/leaderboard-config').set(bearer(adminId, [Role.ADMIN])).expect(200);
