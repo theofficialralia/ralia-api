@@ -5170,6 +5170,12 @@
             "example": "S5",
             "description": "The current season key."
           },
+          "season_ends_at": {
+            "type": "object",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When this season ends (null if seasons never reset)."
+          },
           "total": {
             "type": "number",
             "example": 128,
@@ -5194,6 +5200,7 @@
         },
         "required": [
           "season",
+          "season_ends_at",
           "total",
           "top",
           "me"
@@ -7549,6 +7556,12 @@
             "type": "string",
             "example": "S5"
           },
+          "season_ends_at": {
+            "type": "object",
+            "format": "date-time",
+            "nullable": true,
+            "description": "When this season ends (null if seasons never reset)."
+          },
           "total": {
             "type": "number",
             "example": 128
@@ -7562,6 +7575,7 @@
         },
         "required": [
           "season",
+          "season_ends_at",
           "total",
           "rows"
         ]

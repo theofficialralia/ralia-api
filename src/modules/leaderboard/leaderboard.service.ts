@@ -136,7 +136,7 @@ export class LeaderboardService {
   /** The full season standings for admins — real names, season + lifetime points,
    *  tier and streak, ranked. Not privacy-masked (admin-only). */
   async adminBoard(limit: number, now: Date = new Date()): Promise<import('./dto/leaderboard.dto').AdminLeaderboardDto> {
-    const seasonKey = await this.config.currentSeasonKey(now);
+    const { key: seasonKey, endsAt } = await this.config.currentSeasonWindow(now);
     const [scores, total] = await Promise.all([
       this.prisma.promoterScore.findMany({
         where: { seasonKey },
@@ -153,6 +153,7 @@ export class LeaderboardService {
     const nameOf = new Map(profiles.map((p) => [p.userId, p.fullName]));
     return {
       season: seasonKey,
+      season_ends_at: endsAt?.toISOString() ?? null,
       total,
       rows: scores.map((s, i) => ({
         rank: i + 1,
@@ -194,7 +195,7 @@ export class LeaderboardService {
   /** The season board: the top promoters (live order by season points) plus the
    *  viewer's own ranked row. */
   async board(viewerId: string, limit: number, now: Date = new Date()): Promise<LeaderboardDto> {
-    const seasonKey = await this.config.currentSeasonKey(now);
+    const { key: seasonKey, endsAt } = await this.config.currentSeasonWindow(now);
     const [rows, total, mine] = await Promise.all([
       this.prisma.promoterScore.findMany({
         where: { seasonKey },
@@ -226,7 +227,7 @@ export class LeaderboardService {
       me = { rank: better + 1, display_name: names.get(inSeason.promoterId) ?? 'You', points: inSeason.seasonPoints, tier: inSeason.tier, is_me: true };
     }
 
-    return { season: seasonKey, total, top, me };
+    return { season: seasonKey, season_ends_at: endsAt?.toISOString() ?? null, total, top, me };
   }
 
   /** The viewer's own score card: totals, rank, tier + progress, streak, breakdown. */

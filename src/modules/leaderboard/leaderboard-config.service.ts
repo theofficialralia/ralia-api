@@ -1,7 +1,7 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { LeaderboardConfig } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { seasonKeyFor } from './season';
+import { seasonKeyFor, seasonWindow } from './season';
 
 /**
  * The single active leaderboard_config row — mirrors RateConfigService. All point
@@ -26,5 +26,11 @@ export class LeaderboardConfigService {
   async currentSeasonKey(now: Date = new Date()): Promise<string> {
     const config = await this.getActive();
     return seasonKeyFor(now, config.seasonLengthDays);
+  }
+
+  /** The current season key and when it ends (null when seasons never reset). */
+  async currentSeasonWindow(now: Date = new Date()): Promise<{ key: string; endsAt: Date | null }> {
+    const config = await this.getActive();
+    return seasonWindow(now, config.seasonLengthDays);
   }
 }

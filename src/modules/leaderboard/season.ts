@@ -15,12 +15,18 @@ function utcDayNumber(d: Date): number {
 const SEASON_EPOCH_DAY = utcDayNumber(new Date('2026-01-01T00:00:00Z'));
 
 /**
- * The season key a moment belongs to.
- *   - `seasonLengthDays <= 0` → a single "ALL" season that never resets.
- *   - otherwise → "S{n}", where n is the number of whole seasons since the epoch.
+ * The season a moment belongs to, and when that season ends.
+ *   - `seasonLengthDays <= 0` → a single "ALL" season that never resets (endsAt null).
+ *   - otherwise → "S{n}" plus the UTC-midnight boundary where the next season begins.
  */
-export function seasonKeyFor(date: Date, seasonLengthDays: number): string {
-  if (seasonLengthDays <= 0) return 'ALL';
+export function seasonWindow(date: Date, seasonLengthDays: number): { key: string; endsAt: Date | null } {
+  if (seasonLengthDays <= 0) return { key: 'ALL', endsAt: null };
   const index = Math.floor((utcDayNumber(date) - SEASON_EPOCH_DAY) / seasonLengthDays);
-  return `S${index}`;
+  const endDay = SEASON_EPOCH_DAY + (index + 1) * seasonLengthDays; // exclusive: start of the next season
+  return { key: `S${index}`, endsAt: new Date(endDay * 86_400_000) };
+}
+
+/** The season key a moment belongs to (see {@link seasonWindow}). */
+export function seasonKeyFor(date: Date, seasonLengthDays: number): string {
+  return seasonWindow(date, seasonLengthDays).key;
 }

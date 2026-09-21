@@ -1,7 +1,7 @@
 import { PrismaClient, Role } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { PointsService } from './points.service';
-import { seasonKeyFor } from './season';
+import { seasonKeyFor, seasonWindow } from './season';
 import { testPrisma } from '../../../test/test-db';
 
 describe('Leaderboard — Phase 0 foundations', () => {
@@ -42,6 +42,15 @@ describe('Leaderboard — Phase 0 foundations', () => {
     it('never resets when the length is zero', () => {
       expect(seasonKeyFor(new Date('2026-01-01T00:00:00Z'), 0)).toBe('ALL');
       expect(seasonKeyFor(new Date('2030-06-01T00:00:00Z'), 0)).toBe('ALL');
+    });
+
+    it('seasonWindow reports when the current season ends', () => {
+      // A 30-day season starting at the 2026-01-01 epoch ends at 2026-01-31 (UTC midnight).
+      const w = seasonWindow(new Date('2026-01-15T12:00:00Z'), 30);
+      expect(w.key).toBe('S0');
+      expect(w.endsAt?.toISOString()).toBe('2026-01-31T00:00:00.000Z');
+      // Never-resetting seasons have no end.
+      expect(seasonWindow(new Date('2026-01-15T00:00:00Z'), 0).endsAt).toBeNull();
     });
 
     it('respects a different season length', () => {

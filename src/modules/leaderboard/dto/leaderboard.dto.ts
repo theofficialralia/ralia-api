@@ -23,6 +23,9 @@ export class LeaderboardDto {
   @ApiProperty({ example: 'S5', description: 'The current season key.' })
   season!: string;
 
+  @ApiProperty({ format: 'date-time', nullable: true, description: 'When this season ends (null if seasons never reset).' })
+  season_ends_at!: string | null;
+
   @ApiProperty({ example: 128, description: 'How many promoters have a score this season.' })
   total!: number;
 
@@ -92,6 +95,7 @@ export class AdminLeaderboardRowDto {
 
 export class AdminLeaderboardDto {
   @ApiProperty({ example: 'S5' }) season!: string;
+  @ApiProperty({ format: 'date-time', nullable: true, description: 'When this season ends (null if seasons never reset).' }) season_ends_at!: string | null;
   @ApiProperty({ example: 128 }) total!: number;
   @ApiProperty({ type: [AdminLeaderboardRowDto] }) rows!: AdminLeaderboardRowDto[];
 }
