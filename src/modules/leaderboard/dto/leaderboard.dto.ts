@@ -1,5 +1,6 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PointEventType, PromoterTier } from '@prisma/client';
+import { IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 export class LeaderboardRowDto {
   @ApiProperty({ example: 1 })
@@ -75,4 +76,68 @@ export class MyScoreDto {
 
   @ApiProperty({ type: [PointBreakdownDto], description: 'This season’s points grouped by how they were earned.' })
   breakdown!: PointBreakdownDto[];
+}
+
+// ── Admin config (Phase 4) ───────────────────────────────────
+
+/** The tunable leaderboard_config, as the admin sees and edits it (snake_case). */
+export class LeaderboardConfigDto {
+  @ApiProperty() pts_delivery_completed!: number;
+  @ApiProperty() pts_on_time!: number;
+  @ApiProperty() pts_quality_clean!: number;
+  @ApiProperty() over_base!: number;
+  @ApiProperty() over_cap_ratio!: number;
+  @ApiProperty() streak_step!: number;
+  @ApiProperty() streak_cap!: number;
+  @ApiProperty() pts_breadth!: number;
+  @ApiProperty() pts_milestone!: number;
+  @ApiProperty() penalty_no_show!: number;
+  @ApiProperty() penalty_rejected!: number;
+  @ApiProperty() penalty_duplicate!: number;
+  @ApiProperty() per_campaign_point_cap!: number;
+  @ApiProperty() mult_creation_hundredths!: number;
+  @ApiProperty() mult_distribution_hundredths!: number;
+  @ApiProperty() season_length_days!: number;
+  @ApiProperty() tier_silver_at!: number;
+  @ApiProperty() tier_gold_at!: number;
+  @ApiProperty() tier_platinum_at!: number;
+  @ApiProperty({ example: 0.8 }) tier_reliability_floor!: number;
+}
+
+/** All optional — only fields sent are changed. Non-negative integers; the reliability
+ *  floor is a 0–1 fraction. */
+export class LeaderboardConfigUpdateDto {
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) pts_delivery_completed?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) pts_on_time?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) pts_quality_clean?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) over_base?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) over_cap_ratio?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) streak_step?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) streak_cap?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) pts_breadth?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) pts_milestone?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) penalty_no_show?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) penalty_rejected?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) penalty_duplicate?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) per_campaign_point_cap?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) mult_creation_hundredths?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) mult_distribution_hundredths?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) season_length_days?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) tier_silver_at?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) tier_gold_at?: number;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) tier_platinum_at?: number;
+  @ApiPropertyOptional({ example: 0.8 }) @IsOptional() @IsNumber() @Min(0) @Max(1) tier_reliability_floor?: number;
+}
+
+export class AdjustPointsDto {
+  @ApiProperty({ example: 100, description: 'Points to award (positive) or dock (negative).' })
+  @IsInt()
+  @Min(-100000)
+  @Max(100000)
+  points!: number;
+
+  @ApiProperty({ example: 'Compensating a proof lost in review.', description: 'Why — recorded on the audit log and the point event.' })
+  @IsString()
+  @MaxLength(500)
+  reason!: string;
 }

@@ -90,9 +90,10 @@ describe('admin — decisions, money and audit', () => {
 
   beforeEach(async () => {
     await prisma.$executeRawUnsafe(
-      'TRUNCATE users, user_roles, promoter_profiles, promoter_bank_accounts, channels, client_orgs, campaigns, campaign_slots, offers, assignments, submissions, proof_artifacts, files, withdrawals, accounts, ledger_transactions, ledger_entries, audit_log, rate_config RESTART IDENTITY CASCADE',
+      'TRUNCATE users, user_roles, promoter_profiles, promoter_bank_accounts, channels, client_orgs, campaigns, campaign_slots, offers, assignments, submissions, proof_artifacts, files, withdrawals, accounts, ledger_transactions, ledger_entries, audit_log, point_events, promoter_scores, rate_config, leaderboard_config RESTART IDENTITY CASCADE',
     );
     await prisma.rateConfig.create({ data: { isActive: true } });
+    await prisma.leaderboardConfig.create({ data: {} });
     // The singleton platform accounts the seed normally creates.
     await prisma.account.create({ data: { kind: AccountKind.BANK_CLEARING } });
     await prisma.account.create({ data: { kind: AccountKind.RALIA_REVENUE } });
@@ -911,6 +912,31 @@ describe('admin — decisions, money and audit', () => {
     expect(after.body.take_rate_pct).toBe(25);
     expect(after.body.delivery_threshold_pct).toBe(60);
     expect(await prisma.auditLog.count({ where: { action: 'rate_config.update' } })).toBe(1);
+  });
+
+  it('reads and updates leaderboard rules, and audits the change', async () => {
+    const adminId = await makeAdmin();
+    const before = await http().get('/admin/leaderboard-config').set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect(before.body.pts_delivery_completed).toBe(50);
+    expect(before.body.tier_gold_at).toBe(800);
+
+    const after = await http().patch('/admin/leaderboard-config').set(bearer(adminId, [Role.ADMIN])).send({ pts_delivery_completed: 75, tier_gold_at: 1000 }).expect(200);
+    expect(after.body.pts_delivery_completed).toBe(75);
+    expect(after.body.tier_gold_at).toBe(1000);
+    expect(await prisma.auditLog.count({ where: { action: 'leaderboard_config.update' } })).toBe(1);
+  });
+
+  it('adjusts a promoter’s points manually and audits it', async () => {
+    const adminId = await makeAdmin();
+    const promoterId = await makePromoter();
+    const res = await http().post(`/admin/promoters/${promoterId}/points`).set(bearer(adminId, [Role.ADMIN])).send({ points: 120, reason: 'Compensating a proof lost in review.' }).expect(201);
+    expect(res.body.lifetime_points).toBe(120);
+
+    const ev = await prisma.pointEvent.findFirstOrThrow({ where: { promoterId, type: 'ADJUSTMENT' } });
+    expect(ev.points).toBe(120);
+    expect(await prisma.auditLog.count({ where: { action: 'leaderboard.adjust' } })).toBe(1);
+    // Unknown promoter → 404.
+    await http().post(`/admin/promoters/${randomUUID()}/points`).set(bearer(adminId, [Role.ADMIN])).send({ points: 10, reason: 'x reason' }).expect(404);
   });
 
   it('returns platform analytics with status breakdowns', async () => {

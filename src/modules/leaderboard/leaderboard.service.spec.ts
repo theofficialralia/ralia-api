@@ -33,7 +33,8 @@ describe('LeaderboardService (Phase 2)', () => {
   });
 
   beforeEach(async () => {
-    await prisma.$executeRawUnsafe('TRUNCATE point_events, promoter_scores, leaderboard_snapshots, promoter_profiles, users RESTART IDENTITY CASCADE');
+    await prisma.$executeRawUnsafe('TRUNCATE point_events, promoter_scores, leaderboard_snapshots, promoter_profiles, users, leaderboard_config RESTART IDENTITY CASCADE');
+    await prisma.leaderboardConfig.create({ data: {} });
   });
 
   async function makePromoter(reliability = 0.9, fullName: string | null = null): Promise<string> {

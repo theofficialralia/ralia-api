@@ -7,6 +7,7 @@ import { RequiresCapability, Roles } from '../../common/auth/roles.guard';
 import { RequiresIdempotencyKey } from '../../common/idempotency/idempotency.guard';
 import { AdminService } from './admin.service';
 import { AdminDecisionDto, ApproveSubmissionDto, ExposureReportDto, FundCampaignDto, RateConfigUpdateDto, ReconciliationReportDto, RecordWithdrawalPaidDto, RejectDto, SetCapabilityDto, SetKycDto, SettleGatewayPaymentDto, VerifyChannelDto } from './dto/admin.dto';
+import { AdjustPointsDto, LeaderboardConfigUpdateDto } from '../leaderboard/dto/leaderboard.dto';
 
 /**
  * Admin console API.
@@ -442,6 +443,27 @@ export class AdminController {
   @ApiOperation({ summary: 'Update platform rules', description: 'Only the fields sent change. Audited.' })
   updateRateConfig(@CurrentUser() admin: AuthedUser, @Body() dto: RateConfigUpdateDto) {
     return this.admin.updateRateConfig(admin.id, dto);
+  }
+
+  @Get('leaderboard-config')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Leaderboard rules', description: 'The tunable point values, multipliers, caps, season length and tier thresholds.' })
+  leaderboardConfig() {
+    return this.admin.leaderboardSettings();
+  }
+
+  @Patch('leaderboard-config')
+  @RequiresCapability(AdminCapability.RECORD_MONEY)
+  @ApiOperation({ summary: 'Update leaderboard rules', description: 'Only the fields sent change. Audited.' })
+  updateLeaderboardConfig(@CurrentUser() admin: AuthedUser, @Body() dto: LeaderboardConfigUpdateDto) {
+    return this.admin.updateLeaderboardConfig(admin.id, dto);
+  }
+
+  @Post('promoters/:id/points')
+  @RequiresCapability(AdminCapability.RECORD_MONEY)
+  @ApiOperation({ summary: 'Adjust a promoter’s points', description: 'Award or dock leaderboard points manually. Audited.' })
+  adjustPoints(@CurrentUser() admin: AuthedUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: AdjustPointsDto) {
+    return this.admin.adjustPromoterPoints(admin.id, id, dto);
   }
 
   @Get('audit-log')

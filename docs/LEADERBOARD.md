@@ -365,10 +365,13 @@ Admin app:
 - [x] Privacy: names are shown as **first name + last initial** ("Ada O."), not full
       names — a privacy-preserving default. (Swap to opt-in handles later if desired.)
 
-### Phase 4 — Admin & config
-- [ ] Admin Settings: edit `leaderboard_config` (point values, multipliers, caps, season
-      length, tier thresholds) — mirror the rate-config screen.
-- [ ] Admin: manual `ADJUSTMENT` action (capability-gated, audited).
+### Phase 4 — Admin & config ✅ done
+- [x] `GET/PATCH /admin/leaderboard-config` (capability-gated, audited) + a **Leaderboard**
+      tab in admin Settings editing every point value, multiplier, cap, season length and
+      tier threshold — mirrors the platform-rules screen.
+- [x] `POST /admin/promoters/:id/points` — a manual `ADJUSTMENT` (award or dock, audited,
+      recomputes the score) + an "Adjust points" modal on the admin promoter detail.
+      Admin specs cover the config update and the adjustment.
 
 ### Phase 5 — Tiers & gating 🟡 gate done
 - [x] Enforce `Campaign.minTier` in `buildEligibility` (matching candidates + the quote's

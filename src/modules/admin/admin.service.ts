@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import {
   AccountKind,
   AssignmentStatus,
@@ -36,6 +37,7 @@ import { PointsService } from '../leaderboard/points.service';
 import { LeaderboardConfigService } from '../leaderboard/leaderboard-config.service';
 import { LeaderboardService } from '../leaderboard/leaderboard.service';
 import { deliveryAwards, applyCampaignCap } from '../leaderboard/points-rules';
+import { AdjustPointsDto, LeaderboardConfigUpdateDto } from '../leaderboard/dto/leaderboard.dto';
 import { AuditService } from './audit.service';
 import { AdminDecisionDto, GatewayPaymentDto, RateConfigUpdateDto, ReconciliationReportDto } from './dto/admin.dto';
 
@@ -1918,6 +1920,98 @@ export class AdminService {
       );
     });
     return this.platformRules();
+  }
+
+  // ── Leaderboard config + manual adjustments (Phase 4) ─────
+
+  async leaderboardSettings() {
+    const c = await this.leaderboardConfig.getActive();
+    return {
+      pts_delivery_completed: c.ptsDeliveryCompleted,
+      pts_on_time: c.ptsOnTime,
+      pts_quality_clean: c.ptsQualityClean,
+      over_base: c.overBase,
+      over_cap_ratio: c.overCapRatio,
+      streak_step: c.streakStep,
+      streak_cap: c.streakCap,
+      pts_breadth: c.ptsBreadth,
+      pts_milestone: c.ptsMilestone,
+      penalty_no_show: c.penaltyNoShow,
+      penalty_rejected: c.penaltyRejected,
+      penalty_duplicate: c.penaltyDuplicate,
+      per_campaign_point_cap: c.perCampaignPointCap,
+      mult_creation_hundredths: c.multCreationHundredths,
+      mult_distribution_hundredths: c.multDistributionHundredths,
+      season_length_days: c.seasonLengthDays,
+      tier_silver_at: c.tierSilverAt,
+      tier_gold_at: c.tierGoldAt,
+      tier_platinum_at: c.tierPlatinumAt,
+      tier_reliability_floor: c.tierReliabilityFloor.toNumber(),
+    };
+  }
+
+  async updateLeaderboardConfig(adminId: string, dto: LeaderboardConfigUpdateDto) {
+    const c = await this.leaderboardConfig.getActive();
+    const data: Prisma.LeaderboardConfigUpdateInput = {};
+    if (dto.pts_delivery_completed !== undefined) data.ptsDeliveryCompleted = dto.pts_delivery_completed;
+    if (dto.pts_on_time !== undefined) data.ptsOnTime = dto.pts_on_time;
+    if (dto.pts_quality_clean !== undefined) data.ptsQualityClean = dto.pts_quality_clean;
+    if (dto.over_base !== undefined) data.overBase = dto.over_base;
+    if (dto.over_cap_ratio !== undefined) data.overCapRatio = dto.over_cap_ratio;
+    if (dto.streak_step !== undefined) data.streakStep = dto.streak_step;
+    if (dto.streak_cap !== undefined) data.streakCap = dto.streak_cap;
+    if (dto.pts_breadth !== undefined) data.ptsBreadth = dto.pts_breadth;
+    if (dto.pts_milestone !== undefined) data.ptsMilestone = dto.pts_milestone;
+    if (dto.penalty_no_show !== undefined) data.penaltyNoShow = dto.penalty_no_show;
+    if (dto.penalty_rejected !== undefined) data.penaltyRejected = dto.penalty_rejected;
+    if (dto.penalty_duplicate !== undefined) data.penaltyDuplicate = dto.penalty_duplicate;
+    if (dto.per_campaign_point_cap !== undefined) data.perCampaignPointCap = dto.per_campaign_point_cap;
+    if (dto.mult_creation_hundredths !== undefined) data.multCreationHundredths = dto.mult_creation_hundredths;
+    if (dto.mult_distribution_hundredths !== undefined) data.multDistributionHundredths = dto.mult_distribution_hundredths;
+    if (dto.season_length_days !== undefined) data.seasonLengthDays = dto.season_length_days;
+    if (dto.tier_silver_at !== undefined) data.tierSilverAt = dto.tier_silver_at;
+    if (dto.tier_gold_at !== undefined) data.tierGoldAt = dto.tier_gold_at;
+    if (dto.tier_platinum_at !== undefined) data.tierPlatinumAt = dto.tier_platinum_at;
+    if (dto.tier_reliability_floor !== undefined) data.tierReliabilityFloor = new Prisma.Decimal(dto.tier_reliability_floor);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.leaderboardConfig.update({ where: { id: c.id }, data });
+      await this.audit.record(
+        { actorId: adminId, action: 'leaderboard_config.update', entityType: 'leaderboard_config', entityId: c.id, after: dto },
+        tx,
+      );
+    });
+    return this.leaderboardSettings();
+  }
+
+  /** A manual leaderboard adjustment — award or dock points, audited. */
+  async adjustPromoterPoints(adminId: string, promoterId: string, dto: AdjustPointsDto) {
+    const promoter = await this.prisma.promoterProfile.findUnique({ where: { userId: promoterId }, select: { userId: true } });
+    if (!promoter) throw new NotFoundException('No such promoter.');
+
+    const now = new Date();
+    const seasonKey = await this.leaderboardConfig.currentSeasonKey(now);
+    await this.prisma.$transaction(async (tx) => {
+      await this.points.award(
+        {
+          promoterId,
+          type: 'ADJUSTMENT',
+          points: dto.points,
+          // Manual adjustments aren't tied to a source event, so each is distinct.
+          dedupeKey: `ADJUSTMENT:${randomUUID()}`,
+          seasonKey,
+          occurredAt: now,
+          metadata: { reason: dto.reason, by: adminId },
+        },
+        tx,
+      );
+      await this.leaderboard.recomputeScore(promoterId, now, tx);
+      await this.audit.record(
+        { actorId: adminId, action: 'leaderboard.adjust', entityType: 'promoter', entityId: promoterId, after: { points: dto.points, reason: dto.reason } },
+        tx,
+      );
+    });
+    return this.leaderboard.myScore(promoterId, now);
   }
 
   async auditLog(limit = 50) {
