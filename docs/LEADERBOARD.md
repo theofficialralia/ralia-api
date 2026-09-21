@@ -316,13 +316,17 @@ Admin app:
 
 ## 11. Implementation checklist
 
-### Phase 0 — Foundations (data + config)
-- [ ] Add `PointEventType`, `PromoterTier` enums; `point_events`, `promoter_scores`,
+### Phase 0 — Foundations (data + config) ✅ done
+- [x] Add `PointEventType`, `PromoterTier` enums; `point_events`, `promoter_scores`,
       `leaderboard_snapshots`, `leaderboard_config` tables; `PromoterProfile.tier` and
-      `Campaign.minTier` columns. Migration + seed one `leaderboard_config` row.
-- [ ] `PointsService.award(input, tx)` — idempotent insert into `point_events`
-      (dedupeKey), mirroring `NotificationService.create`.
-- [ ] `seasonKeyFor(date, config)` helper (default `YYYY-MM`).
+      `Campaign.minTier` columns. Migration (`20260921000000_add_leaderboard_foundations`)
+      + seeds one `leaderboard_config` row.
+- [x] `PointsService.award(input, tx)` — idempotent insert into `point_events`
+      (dedupeKey), mirroring `NotificationService.create`. `LeaderboardModule` (global).
+- [x] `LeaderboardConfigService.getActive()` / `currentSeasonKey()`.
+- [x] `seasonKeyFor(date, seasonLengthDays)` helper (fixed-length seasons from a stable
+      epoch → `S{n}`, or `ALL` when length ≤ 0). Specs cover award idempotency, tx
+      enlistment, and season bucketing.
 
 ### Phase 1 — Earn points from existing hooks
 - [ ] Emit awards from `approveSubmission`: `DELIVERY_COMPLETED`, `DELIVERED_ON_TIME`,

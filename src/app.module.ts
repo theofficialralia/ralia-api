@@ -13,6 +13,7 @@ import { IdempotencyGuard } from './common/idempotency/idempotency.guard';
 import { MailerModule } from './common/mailer/mailer.module';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { RateConfigModule } from './common/rate-config/rate-config.module';
+import { LeaderboardModule } from './modules/leaderboard/leaderboard.module';
 import { StorageModule } from './common/storage/storage.module';
 import { HealthController } from './health/health.controller';
 import { AdminModule } from './modules/admin/admin.module';
@@ -72,6 +73,7 @@ import { WalletModule } from './modules/wallet/wallet.module';
     PrismaModule,
     CryptoModule,
     RateConfigModule,
+    LeaderboardModule,
     StorageModule,
     MailerModule,
     NotificationModule,
