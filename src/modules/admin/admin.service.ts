@@ -34,6 +34,7 @@ import { templates } from '../notifications/notification-templates';
 import { ScoringService } from '../scoring/scoring.service';
 import { PointsService } from '../leaderboard/points.service';
 import { LeaderboardConfigService } from '../leaderboard/leaderboard-config.service';
+import { LeaderboardService } from '../leaderboard/leaderboard.service';
 import { deliveryAwards, applyCampaignCap } from '../leaderboard/points-rules';
 import { AuditService } from './audit.service';
 import { AdminDecisionDto, GatewayPaymentDto, RateConfigUpdateDto, ReconciliationReportDto } from './dto/admin.dto';
@@ -60,6 +61,7 @@ export class AdminService {
     private readonly notifications: NotificationService,
     private readonly points: PointsService,
     private readonly leaderboardConfig: LeaderboardConfigService,
+    private readonly leaderboard: LeaderboardService,
     @Inject(STORAGE) private readonly storage: StorageProvider,
   ) {}
 
@@ -600,6 +602,8 @@ export class AdminService {
             tx,
           );
         }
+        // Refresh the promoter's rollup so their leaderboard card is live.
+        await this.leaderboard.recomputeScore(assignment.promoterId, now, tx);
         // Notify in the same tx as the payout — the promoter must never be paid
         // without the record of why.
         await this.notifications.create(
@@ -811,6 +815,7 @@ export class AdminService {
           tx,
         );
       }
+      await this.leaderboard.recomputeScore(submission.assignment.promoterId, now, tx);
       await this.notifications.create(
         {
           userId: submission.assignment.promoterId,

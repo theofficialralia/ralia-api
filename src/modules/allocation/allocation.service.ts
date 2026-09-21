@@ -9,6 +9,7 @@ import { NotificationService } from '../notifications/notification.service';
 import { ScoringService } from '../scoring/scoring.service';
 import { PointsService } from '../leaderboard/points.service';
 import { LeaderboardConfigService } from '../leaderboard/leaderboard-config.service';
+import { LeaderboardService } from '../leaderboard/leaderboard.service';
 
 /** Delivery-slot states a promoter can still act on — the ones a missed deadline forfeits. */
 const RECLAIMABLE_SLOT: DeliverySlotStatus[] = [DeliverySlotStatus.PENDING, DeliverySlotStatus.REJECTED];
@@ -47,6 +48,7 @@ export class AllocationService {
     private readonly notifications: NotificationService,
     private readonly points: PointsService,
     private readonly leaderboardConfig: LeaderboardConfigService,
+    private readonly leaderboard: LeaderboardService,
   ) {}
 
   /**
@@ -235,6 +237,7 @@ export class AllocationService {
           { promoterId: assignment.promoterId, type: 'PENALTY_NO_SHOW', points: noShowPoints, dedupeKey: `PENALTY_NO_SHOW:${assignmentId}:${slotViews.filter((v) => v.status === 'MISSED').length}`, seasonKey: lbSeasonKey, assignmentId, campaignId: assignment.campaignId, occurredAt: now },
           tx,
         );
+        await this.leaderboard.recomputeScore(assignment.promoterId, now, tx);
         await this.notifications.create(
           {
             userId: assignment.promoterId,
@@ -282,6 +285,7 @@ export class AllocationService {
         { promoterId: assignment.promoterId, type: 'PENALTY_NO_SHOW', points: noShowPoints, dedupeKey: `PENALTY_NO_SHOW:${assignmentId}:cancel`, seasonKey: lbSeasonKey, assignmentId, campaignId: assignment.campaignId, occurredAt: now },
         tx,
       );
+      await this.leaderboard.recomputeScore(assignment.promoterId, now, tx);
       const oneOff = totalPosts === 1;
       await this.notifications.create(
         {

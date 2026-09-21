@@ -1,15 +1,17 @@
 import { Global, Module } from '@nestjs/common';
 import { LeaderboardConfigService } from './leaderboard-config.service';
+import { LeaderboardScheduler } from './leaderboard.scheduler';
+import { LeaderboardService } from './leaderboard.service';
 import { PointsService } from './points.service';
 
 /**
- * Leaderboard foundations (Phase 0, docs/LEADERBOARD.md). Global so Phase-1 hooks
- * (admin approvals, the reclaim sweep, onboarding) can inject PointsService without
+ * Leaderboard & tiers (docs/LEADERBOARD.md). Global so the delivery hooks (admin
+ * approvals, the reclaim sweep) can inject PointsService + LeaderboardService without
  * importing the module everywhere — same pattern as RateConfigModule.
  */
 @Global()
 @Module({
-  providers: [PointsService, LeaderboardConfigService],
-  exports: [PointsService, LeaderboardConfigService],
+  providers: [PointsService, LeaderboardConfigService, LeaderboardService, LeaderboardScheduler],
+  exports: [PointsService, LeaderboardConfigService, LeaderboardService],
 })
 export class LeaderboardModule {}

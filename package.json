@@ -25,6 +25,7 @@
     "prisma:studio": "prisma studio",
     "seed": "ts-node --transpile-only prisma/seed.ts",
     "openapi": "ts-node --transpile-only scripts/export-openapi.ts",
+    "leaderboard:backfill": "ts-node --transpile-only scripts/backfill-leaderboard.ts",
     "verify:loop": "./scripts/verify-loop.sh"
   },
   "prisma": {

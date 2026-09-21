@@ -340,14 +340,20 @@ Admin app:
 - [ ] `MILESTONE` awards (onboarding / channel verification / first campaign) — deferred.
 - [ ] `REVERSAL` — deferred (no trigger yet; approved submissions aren't un-approved).
 
-### Phase 2 — Aggregate & rank
-- [ ] Per-event light update of the acting promoter's `PromoterScore`
-      (lifetime/season/rolling/streak).
-- [ ] Nightly `LeaderboardScheduler`: recompute ranks per season+scope, write
-      `LeaderboardSnapshot`, recompute + cache `tier` (also mirror to `PromoterProfile`).
-- [ ] Season rollover logic (`seasonLengthDays`).
-- [ ] Backfill job: build `point_events` from historical assignments so launch isn't
-      empty.
+### Phase 2 — Aggregate & rank ✅ done
+- [x] `LeaderboardService.recomputeScore` — rebuild one promoter's rollup
+      (lifetime/season/rolling-90/streak/tier) and mirror the tier to `PromoterProfile`.
+      Called from the delivery hooks (approve/reject/reclaim) so the promoter's card is live.
+- [x] `LeaderboardService.rebuildAll` + `LeaderboardScheduler` (daily): recompute every
+      promoter (so inactivity decays rolling-90 → tiers), rank the current season, and
+      replace the global `LeaderboardSnapshot`.
+- [x] Season rollover is implicit — scores are always computed for the current
+      `seasonKey` (`seasonKeyFor`), so a new season starts at 0 and past snapshots persist.
+- [x] Tier derivation (`tier.ts`, rolling-90 + reliability floor) + `tiersAtOrAbove`
+      for the Phase-5 matching gate.
+- [x] Backfill (`npm run leaderboard:backfill` → `LeaderboardService.backfill`): replay
+      DELIVERY awards for approved submissions and rebuild — idempotent. Specs cover
+      rollup, tier + reliability floor, streak, rolling-90 decay, and ranking/snapshots.
 
 ### Phase 3 — Promoter-facing
 - [ ] `GET /v1/leaderboard` + `GET /v1/promoters/me/score` endpoints + DTOs.
