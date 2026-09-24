@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { JwtAuthGuard } from '../../common/auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/auth/roles.guard';
 import { IdempotencyGuard } from '../../common/idempotency/idempotency.guard';
+import { MarketingModule } from '../../common/marketing/marketing.module';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { PaymentsModule } from './payments.module';
@@ -47,7 +48,7 @@ describe('payments — Paystack verify + fund', () => {
     paystack = new StubPaystack();
 
     const moduleRef = await Test.createTestingModule({
-      imports: [ConfigModule.forRoot({ isGlobal: true }), JwtModule.register({}), PrismaModule, PaymentsModule],
+      imports: [ConfigModule.forRoot({ isGlobal: true }), JwtModule.register({}), PrismaModule, MarketingModule, PaymentsModule],
       providers: [
         { provide: APP_GUARD, useClass: JwtAuthGuard },
         { provide: APP_GUARD, useClass: RolesGuard },

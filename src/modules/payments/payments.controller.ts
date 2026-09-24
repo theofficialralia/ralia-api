@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, HttpStatus, Ip, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
@@ -28,7 +28,16 @@ export class PaymentsController {
     @CurrentUser() user: AuthedUser,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: VerifyPaystackDto,
+    @Ip() ip: string,
+    @Headers('user-agent') userAgent?: string,
   ): Promise<PaymentResultDto> {
-    return this.payments.verifyAndFund(user.id, id, dto.reference);
+    return this.payments.verifyAndFund(user.id, id, dto.reference, {
+      eventId: dto.event_id,
+      fbp: dto.fbp,
+      fbc: dto.fbc,
+      eventSourceUrl: dto.event_source_url,
+      clientIp: ip,
+      userAgent,
+    });
   }
 }

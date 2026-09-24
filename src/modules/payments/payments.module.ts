@@ -7,6 +7,7 @@ import { PaymentsService } from './payments.service';
 import { PaystackService } from './paystack.service';
 import { PaystackWebhookController } from './paystack-webhook.controller';
 
+// MetaConversionsService comes from the @Global MarketingModule — no import needed.
 @Module({
   imports: [LedgerModule, AdminModule, NotificationModule],
   controllers: [PaymentsController, PaystackWebhookController],

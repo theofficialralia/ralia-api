@@ -6,7 +6,22 @@ import { AuditService } from '../admin/audit.service';
 import { NotificationService } from '../notifications/notification.service';
 import { templates } from '../notifications/notification-templates';
 import { formatNaira } from '../ledger/money';
+import { MetaConversionsService } from '../../common/marketing/meta-conversions.service';
 import { PaystackService } from './paystack.service';
+
+/**
+ * Browser-supplied context for mirroring the funding as a Meta `Purchase`
+ * conversion server-side, deduplicated against the browser Pixel via event_id.
+ * All optional; funding proceeds identically when absent.
+ */
+export type MetaPurchaseContext = {
+  eventId?: string;
+  fbp?: string;
+  fbc?: string;
+  eventSourceUrl?: string;
+  clientIp?: string;
+  userAgent?: string;
+};
 
 /**
  * Self-service campaign funding via Paystack.
@@ -24,19 +39,25 @@ export class PaymentsService {
     private readonly audit: AuditService,
     private readonly paystack: PaystackService,
     private readonly notifications: NotificationService,
+    private readonly meta: MetaConversionsService,
   ) {}
 
   private readonly logger = new Logger(PaymentsService.name);
 
   /** Client-initiated: verify the reference and fund the caller's own campaign. */
-  async verifyAndFund(userId: string, campaignId: string, reference: string): Promise<{ status: string; message: string }> {
+  async verifyAndFund(
+    userId: string,
+    campaignId: string,
+    reference: string,
+    meta?: MetaPurchaseContext,
+  ): Promise<{ status: string; message: string }> {
     const org = await this.prisma.clientOrg.findFirst({ where: { ownerUserId: userId } });
     if (!org) throw new ForbiddenException('This account has no client organisation.');
 
     const campaign = await this.prisma.campaign.findUnique({ where: { id: campaignId } });
     if (!campaign || campaign.clientOrgId !== org.id) throw new NotFoundException('No such campaign.');
 
-    return this.settleCharge(campaign, reference, userId);
+    return this.settleCharge(campaign, reference, userId, meta);
   }
 
   /**
@@ -85,7 +106,12 @@ export class PaymentsService {
    * Paystack, matches the amount, credits escrow and takes the campaign LIVE, and opens
    * a reconciliation row. Used by both the client verify and the webhook.
    */
-  private async settleCharge(campaign: Campaign, reference: string, actorId: string): Promise<{ status: string; message: string }> {
+  private async settleCharge(
+    campaign: Campaign,
+    reference: string,
+    actorId: string,
+    meta?: MetaPurchaseContext,
+  ): Promise<{ status: string; message: string }> {
     if (campaign.priceMinor === null) throw new BadRequestException('Get a quote before paying.');
 
     // Idempotency keyed on the Paystack reference itself: verifying the same
@@ -177,8 +203,66 @@ export class PaymentsService {
           );
         }
       });
+
+      // Mirror the funding to Meta as a server-side `Purchase` conversion. Only on
+      // the first settle of this reference (never on a replay), and best-effort:
+      // MetaConversionsService swallows its own errors, but we also guard here so a
+      // lookup failure can't disturb a completed payment. The browser fires the same
+      // Purchase with the same event_id, and Meta deduplicates the pair.
+      await this.sendPurchaseConversion(campaign, reference, v.amountMinor, meta).catch((err) =>
+        this.logger.warn(`Meta Purchase send skipped: ${(err as Error).message}`),
+      );
     }
 
     return { status: CampaignStatus.PENDING_APPROVAL, message: 'Payment received — your campaign is now under review.' };
+  }
+
+  /**
+   * Build and send the Meta `Purchase` conversion for a just-funded campaign.
+   * event_id is the client's shared id when present (so the browser Pixel event
+   * dedupes against this), else a deterministic `purchase:<reference>` so our own
+   * retries/webhook backstop never double-count. Action source is 'website' when
+   * the browser paid (we have a source URL), else 'system_generated' (webhook).
+   */
+  private async sendPurchaseConversion(
+    campaign: Campaign,
+    reference: string,
+    amountMinor: number,
+    meta?: MetaPurchaseContext,
+  ): Promise<void> {
+    if (!this.meta.configured) return;
+    const org = await this.prisma.clientOrg.findUnique({
+      where: { id: campaign.clientOrgId },
+      select: { ownerUserId: true },
+    });
+    const owner = org?.ownerUserId
+      ? await this.prisma.user.findUnique({
+          where: { id: org.ownerUserId },
+          select: { id: true, email: true, phoneE164: true },
+        })
+      : null;
+    await this.meta.send({
+      eventName: 'Purchase',
+      eventId: meta?.eventId ?? `purchase:${reference}`,
+      actionSource: meta?.eventSourceUrl ? 'website' : 'system_generated',
+      eventSourceUrl: meta?.eventSourceUrl,
+      user: {
+        email: owner?.email,
+        phone: owner?.phoneE164,
+        externalId: owner?.id,
+        clientIpAddress: meta?.clientIp,
+        clientUserAgent: meta?.userAgent,
+        fbp: meta?.fbp,
+        fbc: meta?.fbc,
+      },
+      customData: {
+        currency: 'NGN',
+        value: Number(amountMinor) / 100,
+        content_type: 'product',
+        content_ids: [campaign.id],
+        content_name: campaign.name,
+        order_id: reference,
+      },
+    });
   }
 }

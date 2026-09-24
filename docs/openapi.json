@@ -4706,6 +4706,14 @@
             }
           },
           {
+            "name": "user-agent",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "Idempotency-Key",
             "in": "header",
             "required": false,
@@ -8216,6 +8224,22 @@
             "type": "string",
             "example": "RLA-1a2b3c4d-9f2k84b",
             "description": "The reference Paystack returned on the client."
+          },
+          "event_id": {
+            "type": "string",
+            "description": "Shared event_id for Meta Pixel/CAPI deduplication."
+          },
+          "fbp": {
+            "type": "string",
+            "description": "The _fbp browser cookie, for Meta match quality."
+          },
+          "fbc": {
+            "type": "string",
+            "description": "The _fbc browser cookie (from fbclid), for Meta match quality."
+          },
+          "event_source_url": {
+            "type": "string",
+            "description": "The page URL the browser Purchase event fired on."
           }
         },
         "required": [
