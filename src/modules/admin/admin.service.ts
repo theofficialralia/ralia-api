@@ -2076,6 +2076,38 @@ export class AdminService {
       this.rateConfig.getActive(),
     ]);
 
+    // Spend by category: funded client spend grouped by the client's industry, so
+    // admins can see which kinds of business are driving GMV (what to scale vs trim).
+    const fundedCampaigns = await this.prisma.campaign.findMany({
+      where: { status: { in: FUNDED_STATUSES }, priceMinor: { not: null } },
+      select: { priceMinor: true, clientOrg: { select: { industry: true } } },
+    });
+    const categorySpend = new Map<string, bigint>();
+    for (const c of fundedCampaigns) {
+      const key = c.clientOrg?.industry?.trim() || 'Uncategorised';
+      categorySpend.set(key, (categorySpend.get(key) ?? 0n) + (c.priceMinor ?? 0n));
+    }
+    const spend_by_category = [...categorySpend.entries()]
+      .sort((a, b) => (b[1] > a[1] ? 1 : b[1] < a[1] ? -1 : 0))
+      .map(([category, minor]) => ({ category, spend: toMoney(minor) }));
+
+    // Promoter performance by role: fees earned (approved/paid work) and how many
+    // distinct campaigns each role delivered on — Creators vs Distributors vs others.
+    const settledAssignments = await this.prisma.assignment.findMany({
+      where: { status: { in: [AssignmentStatus.APPROVED, AssignmentStatus.PAID] } },
+      select: { role: true, feeMinor: true, campaignId: true },
+    });
+    const roleAgg = new Map<string, { earnings: bigint; campaigns: Set<string> }>();
+    for (const a of settledAssignments) {
+      const e = roleAgg.get(a.role) ?? { earnings: 0n, campaigns: new Set<string>() };
+      e.earnings += a.feeMinor;
+      e.campaigns.add(a.campaignId);
+      roleAgg.set(a.role, e);
+    }
+    const promoter_performance = [...roleAgg.entries()]
+      .map(([role, v]) => ({ role, earnings: toMoney(v.earnings), campaigns: v.campaigns.size }))
+      .sort((a, b) => b.earnings.amount_minor - a.earnings.amount_minor);
+
     // Ralia revenue is the balance of the platform revenue account.
     const revenueAcc = await this.prisma.account.findFirst({ where: { kind: AccountKind.RALIA_REVENUE, ownerId: null } });
     let revenue = 0n;
@@ -2099,6 +2131,8 @@ export class AdminService {
       active_clients: activeClients,
       promoters_by_status: promotersByStatus.map((r) => ({ status: r.status, count: r._count._all })),
       campaigns_by_status: campaignsByStatus.map((r) => ({ status: r.status, count: r._count._all })),
+      spend_by_category,
+      promoter_performance,
     };
   }
 }
