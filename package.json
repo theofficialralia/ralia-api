@@ -25,6 +25,7 @@
     "prisma:studio": "prisma studio",
     "seed": "ts-node --transpile-only prisma/seed.ts",
     "openapi": "ts-node --transpile-only scripts/export-openapi.ts",
+    "leaderboard:backfill": "ts-node --transpile-only scripts/backfill-leaderboard.ts",
     "verify:loop": "./scripts/verify-loop.sh"
   },
   "prisma": {
@@ -43,6 +44,7 @@
     "argon2": "^0.41.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "google-auth-library": "^10.9.1",
     "helmet": "^8.0.0",
     "nestjs-pino": "^4.1.0",
     "nodemailer": "^9.0.3",

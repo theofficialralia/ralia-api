@@ -94,6 +94,9 @@ export class AnalyticsService {
       acceptance_rate: acceptanceRate,
       completed,
       slots_total: campaign.slotsTotal,
+      // Success rate: verified reach delivered against the reach the client paid for.
+      target_reach: campaign.targetReach,
+      success_rate_pct: campaign.targetReach > 0 ? Math.round((views / campaign.targetReach) * 100) : 0,
       evidence: await this.evidenceGallery(campaignId),
     };
   }
@@ -127,7 +130,13 @@ export class AnalyticsService {
           promoter_handle: s.assignment.channel.handle,
           platform: s.assignment.channel.platform,
           submitted_at: s.submittedAt.toISOString(),
-          views: viewsByToken.get(s.assignment.trackingToken) ?? 0,
+          // The post's view count as the PROMOTER reported it — the admin-verified
+          // figure once approved, otherwise their own claim (pending review). This is
+          // the reach the campaign is settled on, and is distinct from link clicks.
+          views: s.verifiedReach ?? s.claimedViews ?? 0,
+          views_verified: s.verdict === 'APPROVED' && s.verifiedReach != null,
+          // Link clicks the platform recorded — a separate delivery signal.
+          clicks: viewsByToken.get(s.assignment.trackingToken) ?? 0,
           verdict: s.verdict,
           auto_flag: s.autoFlag,
           public_url: s.publicUrl,

@@ -6,8 +6,10 @@ import { ScoringModule } from '../scoring/scoring.module';
 import { AllocationScheduler } from './allocation.scheduler';
 import { AllocationService } from './allocation.service';
 
+import { LeaderboardModule } from '../leaderboard/leaderboard.module';
+
 @Module({
-  imports: [ScoringModule, MatchingModule, RateConfigModule, NotificationModule],
+  imports: [ScoringModule, MatchingModule, RateConfigModule, NotificationModule, LeaderboardModule],
   providers: [AllocationService, AllocationScheduler],
   exports: [AllocationService],
 })

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { AssetKind, Cadence, CampaignObjective, CampaignStatus, PromoterRole } from '@prisma/client';
+import { AssetKind, Cadence, CampaignObjective, CampaignStatus, PromoterRole, PromoterTier } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -77,10 +77,19 @@ export class CreateCampaignDto {
   @MaxLength(2000)
   promoter_instructions?: string;
 
-  @ApiProperty({ example: 'https://naijathreads.example/shop' })
+  @ApiPropertyOptional({
+    example: 'https://naijathreads.example/shop',
+    description: 'Where clicks are sent. Required for click-driven objectives; optional for AWARENESS (views-only).',
+  })
+  @IsOptional()
   @IsUrl({ require_protocol: true })
   @MaxLength(400)
-  destination_url!: string;
+  destination_url?: string;
+
+  @ApiPropertyOptional({ enum: PromoterTier, description: 'Restrict this campaign to promoters at or above a leaderboard tier. Omit for open-to-all.' })
+  @IsOptional()
+  @IsEnum(PromoterTier)
+  min_tier?: PromoterTier;
 
   @ApiProperty({ example: 12, minimum: 1, maximum: 500, description: 'How many promoter slots.' })
   @IsInt()
@@ -141,6 +150,11 @@ export class UpdateCampaignDto {
   @IsUrl({ require_protocol: true })
   @MaxLength(400)
   destination_url?: string;
+
+  @ApiPropertyOptional({ enum: PromoterTier, description: 'Restrict to promoters at or above a tier. Omit to leave unchanged.' })
+  @IsOptional()
+  @IsEnum(PromoterTier)
+  min_tier?: PromoterTier;
 
   @ApiPropertyOptional({ example: 12, minimum: 1, maximum: 500 })
   @IsOptional()
@@ -305,6 +319,9 @@ export class CampaignDto {
   @ApiProperty()
   destination_url!: string | null;
 
+  @ApiProperty({ enum: PromoterTier, nullable: true, description: 'Minimum promoter tier eligible for this campaign, or null for open-to-all.' })
+  min_tier!: PromoterTier | null;
+
   @ApiProperty()
   slots_total!: number;
 
@@ -362,22 +379,49 @@ export class CampaignTargetingView {
   @ApiProperty({ type: [String] }) roles!: string[];
 }
 
-/** Drive a stateless quote preview by a budget or a slot count (budget wins if both given). */
+/**
+ * Drive a stateless quote preview. The primary driver is `price_minor` — the
+ * exact amount the client chose to spend, which is charged as-is (governing logic
+ * #2: price is authoritative; only the promoter count rounds). `budget_minor` and
+ * `slots` are the legacy slot-count drivers, kept for back-compat. Precedence:
+ * price_minor › budget_minor › slots.
+ */
 export class PlanRequestDto {
-  @ApiPropertyOptional({ example: 500000, description: 'Budget in kobo — solves for how many slots it buys.' })
+  @ApiPropertyOptional({ example: 120000, description: 'Exact campaign price in kobo — charged as-is; solves for reach and promoter count.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  price_minor?: number;
+
+  @ApiPropertyOptional({ example: 500000, description: 'Legacy: budget in kobo — solves for how many whole slots it buys.' })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
   budget_minor?: number;
 
-  @ApiPropertyOptional({ example: 12, description: 'Slot count — prices that many slots directly.' })
+  @ApiPropertyOptional({ example: 12, description: 'Legacy: slot count — prices that many slots directly.' })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
   @Max(10000)
   slots?: number;
+}
+
+/**
+ * Commit a quote. With `price_minor` the campaign is priced at that EXACT amount
+ * (validated against the category floor) and the promoter count is derived from
+ * it. Without it, quote falls back to the legacy slot-count pricing.
+ */
+export class QuoteRequestDto {
+  @ApiPropertyOptional({ example: 120000, description: 'Exact campaign price in kobo to freeze. Must clear the category floor.' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  price_minor?: number;
 }
 
 /** Read-only pricing preview for the budget↔reach slider — persists nothing. */
@@ -446,4 +490,7 @@ export class QuoteDto {
 
   @ApiProperty({ example: 3, description: 'Active targeting filters feeding the multiplier.' })
   active_filters!: number;
+
+  @ApiProperty({ example: 8000, description: 'The verified views this campaign is paid to deliver (slots × reach per slot × posts).' })
+  target_reach!: number;
 }

@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import {
   AccountKind,
   AssignmentStatus,
@@ -9,16 +10,18 @@ import {
   EntryDirection,
   KycStatus,
   Prisma,
+  PromoterRole,
   PromoterStatus,
   ReconciliationStatus,
   Role,
   SlotStatus,
+  UserStatus,
   VerificationTier,
   Verdict,
   WithdrawalStatus,
 } from '@prisma/client';
 import { computeAssignmentRollup } from '../../common/delivery/delivery';
-import { settleDelivery } from '../../common/pricing/pricing';
+import { categoryForRole, settleDelivery } from '../../common/pricing/pricing';
 import { asRoleConfig, describeRoleTask } from '../../common/campaign/role-task';
 import { channelEffectiveReach } from '../../common/reach/effective-reach';
 import { STORAGE, StorageProvider } from '../../common/storage/storage';
@@ -28,7 +31,13 @@ import { AllocationService } from '../allocation/allocation.service';
 import { LedgerService } from '../ledger/ledger.service';
 import { formatNaira, toMoney } from '../ledger/money';
 import { NotificationService } from '../notifications/notification.service';
+import { templates } from '../notifications/notification-templates';
 import { ScoringService } from '../scoring/scoring.service';
+import { PointsService } from '../leaderboard/points.service';
+import { LeaderboardConfigService } from '../leaderboard/leaderboard-config.service';
+import { LeaderboardService } from '../leaderboard/leaderboard.service';
+import { deliveryAwards, applyCampaignCap } from '../leaderboard/points-rules';
+import { AdjustPointsDto, LeaderboardConfigUpdateDto } from '../leaderboard/dto/leaderboard.dto';
 import { AuditService } from './audit.service';
 import { AdminDecisionDto, GatewayPaymentDto, RateConfigUpdateDto, ReconciliationReportDto } from './dto/admin.dto';
 
@@ -52,6 +61,9 @@ export class AdminService {
     private readonly scoring: ScoringService,
     private readonly allocation: AllocationService,
     private readonly notifications: NotificationService,
+    private readonly points: PointsService,
+    private readonly leaderboardConfig: LeaderboardConfigService,
+    private readonly leaderboard: LeaderboardService,
     @Inject(STORAGE) private readonly storage: StorageProvider,
   ) {}
 
@@ -249,19 +261,14 @@ export class AdminService {
     await this.prisma.$transaction(async (tx) => {
       await tx.campaign.update({
         where: { id: campaignId },
-        // Approved, now awaiting the client's transfer — funding flips it LIVE.
-        data: { status: CampaignStatus.CONFIRMING_PAYMENT, approvedBy: adminId, approvedAt: new Date() },
+        // The client already paid (escrow is funded) — approval is the final gate,
+        // so approving takes it LIVE and matching begins.
+        data: { status: CampaignStatus.LIVE, approvedBy: adminId, approvedAt: new Date() },
       });
       if (ownerId) {
+        const t = templates.campaignLive(campaignId, campaign.name);
         await this.notifications.create(
-          {
-            userId: ownerId,
-            type: 'campaign.approved',
-            title: 'Campaign approved',
-            body: `"${campaign.name}" is approved. Fund it with the quoted amount to take it live and start matching promoters.`,
-            data: { campaignId },
-            dedupeKey: `campaign.approved:${campaignId}`,
-          },
+          { userId: ownerId, type: t.type, title: t.title, body: t.body, data: t.data, dedupeKey: `campaign.live:${campaignId}` },
           tx,
         );
       }
@@ -272,13 +279,13 @@ export class AdminService {
           entityType: 'campaign',
           entityId: campaignId,
           before: { status: campaign.status },
-          after: { status: CampaignStatus.CONFIRMING_PAYMENT },
+          after: { status: CampaignStatus.LIVE },
         },
         tx,
       );
     });
 
-    return { id: campaignId, status: CampaignStatus.CONFIRMING_PAYMENT, message: 'Campaign approved; awaiting payment.' };
+    return { id: campaignId, status: CampaignStatus.LIVE, message: 'Campaign approved; it is now live.' };
   }
 
   async rejectCampaign(adminId: string, campaignId: string, reason: string, terminal = false): Promise<AdminDecisionDto> {
@@ -288,10 +295,25 @@ export class AdminService {
       throw new ConflictException(`A ${campaign.status} campaign is not awaiting approval.`);
     }
 
-    // Two-type reject: "temporary" (default) → REJECTED, the owner can edit and
-    // resubmit; "entirely"/terminal → CANCELLED, not resubmittable.
+    // The client has already paid (escrow is funded), so a reject decides the money:
+    //   • terminal ("reject entirely")  → refund the escrow to the client, CANCELLED.
+    //   • non-terminal ("needs changes") → hold the escrow, REJECTED; the owner edits
+    //     and resubmits for review without paying again.
     const nextStatus = terminal ? CampaignStatus.CANCELLED : CampaignStatus.REJECTED;
     const ownerId = await this.campaignOwnerId(campaign.clientOrgId);
+
+    if (terminal && campaign.escrowAccountId && campaign.priceMinor) {
+      const clientWalletAccountId = await this.ledger.getOrCreateAccount(AccountKind.CLIENT_WALLET, campaign.clientOrgId);
+      await this.ledger.refundCampaign({
+        campaignId,
+        escrowAccountId: campaign.escrowAccountId,
+        clientWalletAccountId,
+        amountMinor: campaign.priceMinor,
+        idempotencyKey: `refund:${campaignId}`,
+        actorId: adminId,
+      });
+    }
+
     await this.prisma.$transaction(async (tx) => {
       await tx.campaign.update({ where: { id: campaignId }, data: { status: nextStatus, rejectReason: reason } });
       if (ownerId) {
@@ -299,10 +321,10 @@ export class AdminService {
           {
             userId: ownerId,
             type: 'campaign.rejected',
-            title: terminal ? 'Campaign rejected' : 'Campaign needs changes',
+            title: terminal ? 'Campaign rejected — refunded' : 'Campaign needs changes',
             body: terminal
-              ? `"${campaign.name}" was rejected and can't be resubmitted: ${reason}`
-              : `"${campaign.name}" wasn't approved: ${reason} Edit and resubmit it for review.`,
+              ? `"${campaign.name}" was rejected: ${reason} Your payment has been refunded to your Ralia balance.`
+              : `"${campaign.name}" wasn't approved: ${reason} Edit and resubmit it for review — no need to pay again.`,
             data: { campaignId, reason, terminal },
             dedupeKey: `campaign.rejected:${campaignId}`,
           },
@@ -316,7 +338,7 @@ export class AdminService {
           entityType: 'campaign',
           entityId: campaignId,
           before: { status: campaign.status },
-          after: { status: CampaignStatus.REJECTED },
+          after: { status: nextStatus, refunded: terminal },
           reason,
         },
         tx,
@@ -350,7 +372,11 @@ export class AdminService {
       return { id: campaignId, status: campaign.status, message: 'Already recorded.' };
     }
 
-    if (campaign.status !== CampaignStatus.CONFIRMING_PAYMENT) {
+    // Recording a bank transfer is the same as a card payment: it funds escrow and
+    // sends the campaign to review (an admin still approves it live). So a quoted
+    // campaign is what's fundable.
+    const fundable: CampaignStatus[] = [CampaignStatus.QUOTED, CampaignStatus.CONFIRMING_PAYMENT];
+    if (!fundable.includes(campaign.status)) {
       throw new ConflictException(`A ${campaign.status} campaign is not awaiting funding.`);
     }
     if (campaign.priceMinor === null) {
@@ -379,21 +405,10 @@ export class AdminService {
       await this.prisma.$transaction(async (tx) => {
         await tx.campaign.update({
           where: { id: campaignId },
-          data: { status: CampaignStatus.LIVE, escrowAccountId },
+          // Payment recorded → into review, not live. Approval flips it live.
+          data: { status: CampaignStatus.PENDING_APPROVAL, escrowAccountId },
         });
-        if (ownerId) {
-          await this.notifications.create(
-            {
-              userId: ownerId,
-              type: 'campaign.live',
-              title: 'Campaign is live 🚀',
-              body: `"${campaign.name}" is funded and live — we're now matching it to promoters. Track delivery from your dashboard.`,
-              data: { campaignId },
-              dedupeKey: `campaign.live:${campaignId}`,
-            },
-            tx,
-          );
-        }
+        void ownerId; // no live email here — approval sends it
         await this.audit.record(
           {
             actorId: adminId,
@@ -401,7 +416,7 @@ export class AdminService {
             entityType: 'campaign',
             entityId: campaignId,
             before: { status: campaign.status, escrowAccountId: campaign.escrowAccountId },
-            after: { status: CampaignStatus.LIVE, escrowAccountId, amountMinor },
+            after: { status: CampaignStatus.PENDING_APPROVAL, escrowAccountId, amountMinor },
             reason: reference,
           },
           tx,
@@ -409,7 +424,7 @@ export class AdminService {
       });
     }
 
-    return { id: campaignId, status: CampaignStatus.LIVE, message: replayed ? 'Already recorded.' : 'Funding recorded; campaign is live.' };
+    return { id: campaignId, status: CampaignStatus.PENDING_APPROVAL, message: replayed ? 'Already recorded.' : 'Funding recorded; campaign is now under review.' };
   }
 
   // ── Submissions ──────────────────────────────────────────
@@ -504,6 +519,50 @@ export class AdminService {
         ? assignment.deliverySlots.map((s) => ({ index: s.index, status: s.id === slot?.id ? DeliverySlotStatus.APPROVED : s.status }))
         : [{ index: 1, status: DeliverySlotStatus.APPROVED }];
       const rollup = computeAssignmentRollup(nextSlotViews);
+
+      // §auto-reopen — economics for a possible reopen, resolved before the tx (pure
+      // config + a ledger read; no writes). A campaign that falls short of the reach
+      // the client paid for (targetReach) re-buys the missing reach with the escrow
+      // that settleDelivery left behind on under-deliveries, by opening more slots for
+      // the allocation sweep to fill. Each new slot mirrors the campaign's per-slot
+      // economics, so an accepted replacement is priced and reach-targeted identically.
+      const repSlot = await this.prisma.campaignSlot.findFirst({ where: { campaignId: campaign.id } });
+      const reopenCategory = categoryForRole(repSlot?.role ?? PromoterRole.DISTRIBUTOR);
+      const reopenDefaults = await this.rateConfig.getCategoryDefaults(reopenCategory);
+      const reopenTargeting = await this.prisma.campaignTargeting.findUnique({ where: { campaignId: campaign.id } });
+      const posts = campaign.postsRequired;
+      const reachPerPost = (reopenTargeting?.minEffectiveReach ?? 0) > 0 ? reopenTargeting!.minEffectiveReach : reopenDefaults.reachPerSlot;
+      const reachPerSlotTotal = reachPerPost * posts;
+      const unitPricePerPost = repSlot?.unitPriceMinor ?? 0n;
+      const slotCostMinor = unitPricePerPost * BigInt(posts);
+      const escrowBalanceMinor = await this.ledger.getBalance(campaign.escrowAccountId);
+      // Set inside the tx when the campaign finalises with no work left that could
+      // still draw on escrow — the leftover (undelivered) escrow is then swept to
+      // revenue after the tx commits (retainCampaignRemainder runs its own tx).
+      let finalizeRemainder = false;
+
+      // §leaderboard (Phase 1) — the points this approval earns, resolved before the tx
+      // (pure config + a read of the campaign's prior positive points for the cap) and
+      // written inside the same tx as the payout, so a promoter is never paid without
+      // the record of what they earned. Over-delivery is where effort is rewarded (§4).
+      const lbConfig = await this.leaderboardConfig.getActive();
+      const lbSeasonKey = await this.leaderboardConfig.currentSeasonKey(now);
+      const priorAgg = await this.prisma.pointEvent.aggregate({
+        where: { promoterId: assignment.promoterId, campaignId: campaign.id, points: { gt: 0 } },
+        _sum: { points: true },
+      });
+      const pointAwards = applyCampaignCap(
+        deliveryAwards(lbConfig, {
+          verified: verifiedViews,
+          promised: reachBasis,
+          onTime: deliveredOnTime,
+          autoFlag: submission.autoFlag,
+          isCreation: reopenCategory === 'CREATION',
+        }),
+        priorAgg._sum.points ?? 0,
+        lbConfig.perCampaignPointCap,
+      );
+
       await this.prisma.$transaction(async (tx) => {
         await tx.submission.update({
           where: { id: submissionId },
@@ -528,6 +587,25 @@ export class AdminService {
           now,
           tx,
         );
+        // §leaderboard — award the pre-computed points (idempotent per submission).
+        for (const a of pointAwards) {
+          await this.points.award(
+            {
+              promoterId: assignment.promoterId,
+              type: a.type,
+              points: a.points,
+              dedupeKey: `${a.type}:${submissionId}`,
+              seasonKey: lbSeasonKey,
+              submissionId,
+              assignmentId: assignment.id,
+              campaignId: campaign.id,
+              occurredAt: now,
+            },
+            tx,
+          );
+        }
+        // Refresh the promoter's rollup so their leaderboard card is live.
+        await this.leaderboard.recomputeScore(assignment.promoterId, now, tx);
         // Notify in the same tx as the payout — the promoter must never be paid
         // without the record of why.
         await this.notifications.create(
@@ -536,7 +614,7 @@ export class AdminService {
             type: 'submission.approved',
             title: 'Submission approved — you got paid',
             body: `Your proof for "${campaign.name}" was approved. ${formatNaira(settlement.promoterFeeMinor)} has been added to your balance.`,
-            data: { submissionId, campaignId: campaign.id, feeMinor: Number(settlement.promoterFeeMinor) },
+            data: { submissionId, assignmentId: assignment.id, campaignId: campaign.id, feeMinor: Number(settlement.promoterFeeMinor) },
             dedupeKey: `submission.approved:${submissionId}`,
           },
           tx,
@@ -559,10 +637,16 @@ export class AdminService {
           );
         }
 
-        // Fulfilment is decided here, at the approval that resolves the last post:
-        // when no campaign slot is still open AND no scheduled post is still pending
-        // or in review, every promised post has landed and passed review → FULFILLED.
-        // (§multi-day: this is now per-post, not per-assignment.)
+        // §auto-reopen — fulfilment is reach-driven, decided at each approval:
+        //   • target met (Σ verified ≥ what the client paid for) → FULFILLED.
+        //   • target not met but work still in flight (open slots or posts pending/in
+        //     review) → stay LIVE and let it land.
+        //   • target not met and nothing left in flight → try to REOPEN: open as many
+        //     fresh slots as the retained escrow can fund (capped at the reach still
+        //     owed) so the allocation sweep keeps matching. Only when the budget can't
+        //     buy even one more slot do we call it done.
+        // This is what stops a campaign being marked complete on an under-delivery, and
+        // stops the admin ever seeing a shortfall settle as if it were fully delivered.
         if (campaign.status === CampaignStatus.LIVE) {
           const openSlots = await tx.campaignSlot.count({
             where: { campaignId: campaign.id, status: { in: [SlotStatus.OPEN, SlotStatus.OFFERED] } },
@@ -573,18 +657,64 @@ export class AdminService {
               status: { in: [DeliverySlotStatus.PENDING, DeliverySlotStatus.SUBMITTED] },
             },
           });
-          if (openSlots === 0 && outstandingPosts === 0) {
-            await tx.campaign.update({ where: { id: campaign.id }, data: { status: CampaignStatus.FULFILLED } });
+          const verifiedAgg = await tx.submission.aggregate({
+            where: { assignment: { campaignId: campaign.id }, verdict: Verdict.APPROVED },
+            _sum: { verifiedReach: true },
+          });
+          const totalVerified = verifiedAgg._sum.verifiedReach ?? 0;
+          const target = campaign.targetReach;
+          const reachMet = target > 0 && totalVerified >= target;
+          const workInFlight = openSlots > 0 || outstandingPosts > 0;
+
+          // How many slots to reopen: enough to close the reach deficit, but never
+          // more than the escrow on hand can actually pay for.
+          let reopenCount = 0;
+          if (!reachMet && !workInFlight && target > 0 && reachPerSlotTotal > 0 && slotCostMinor > 0n) {
+            const deficit = target - totalVerified;
+            const slotsForDeficit = Math.ceil(deficit / reachPerSlotTotal);
+            const slotsAffordable = Number(escrowBalanceMinor / slotCostMinor); // bigint floor
+            reopenCount = Math.max(0, Math.min(slotsForDeficit, slotsAffordable));
+          }
+
+          if (reopenCount > 0) {
+            await tx.campaignSlot.createMany({
+              data: Array.from({ length: reopenCount }, () => ({
+                campaignId: campaign.id,
+                role: repSlot?.role ?? PromoterRole.DISTRIBUTOR,
+                unitPriceMinor: unitPricePerPost,
+                postsRequired: posts,
+              })),
+            });
+            await tx.campaign.update({
+              where: { id: campaign.id },
+              data: { slotsTotal: { increment: reopenCount } },
+            });
             if (ownerId) {
               await this.notifications.create(
                 {
                   userId: ownerId,
-                  type: 'campaign.fulfilled',
-                  title: 'Campaign fulfilled 🎉',
-                  body: `"${campaign.name}" is complete — every slot delivered and passed review. Open it to see the full evidence gallery and export your report.`,
-                  data: { campaignId: campaign.id },
-                  dedupeKey: `campaign.fulfilled:${campaign.id}`,
+                  type: 'campaign.reopened',
+                  title: 'Still working toward your reach',
+                  body:
+                    `"${campaign.name}" has delivered ${totalVerified.toLocaleString('en-NG')} of ${target.toLocaleString('en-NG')} verified views so far. ` +
+                    `We've opened ${reopenCount} more slot${reopenCount === 1 ? '' : 's'} and are matching new promoters to close the gap - no extra charge.`,
+                  data: { campaignId: campaign.id, totalVerified, targetReach: target, reopened: reopenCount },
+                  // Re-fires each time we reopen, keyed to progress so it's not deduped away.
+                  dedupeKey: `campaign.reopened:${campaign.id}:${totalVerified}`,
                 },
+                tx,
+              );
+            }
+          } else if (reachMet || !workInFlight) {
+            await tx.campaign.update({ where: { id: campaign.id }, data: { status: CampaignStatus.FULFILLED } });
+            // Safe to book the leftover escrow to revenue only when nothing in flight
+            // could still be paid from it. If the target was met while offers/posts are
+            // still outstanding, we finalise the status but leave escrow to cover them.
+            finalizeRemainder = !workInFlight;
+            if (ownerId) {
+              const t = templates.campaignComplete(campaign.id, campaign.name);
+              await this.notifications.create(
+                { userId: ownerId, type: t.type, title: t.title, body: t.body, data: t.data, dedupeKey: `campaign.fulfilled:${campaign.id}` },
                 tx,
               );
             }
@@ -610,6 +740,24 @@ export class AdminService {
           tx,
         );
       });
+
+      // §auto-reopen — the campaign finalised with no work left that could still draw
+      // on escrow, so the undelivered remainder settleDelivery kept in escrow is booked
+      // to revenue now (policy: retained by the platform, no client refund). Run after
+      // the tx (retainCampaignRemainder posts its own balanced transaction) and made
+      // idempotent by the key, so a replay never double-books.
+      if (finalizeRemainder) {
+        const remaining = await this.ledger.getBalance(campaign.escrowAccountId);
+        if (remaining > 0n) {
+          await this.ledger.retainCampaignRemainder({
+            campaignId: campaign.id,
+            escrowAccountId: campaign.escrowAccountId,
+            amountMinor: remaining,
+            idempotencyKey: `campaign.retain:${campaign.id}`,
+            actorId: adminId,
+          });
+        }
+      }
     }
 
     return { id: submissionId, status: Verdict.APPROVED, message: replayed ? 'Already recorded.' : 'Approved and settled.' };
@@ -637,6 +785,10 @@ export class AdminService {
       : AssignmentStatus.REJECTED;
 
     const now = new Date();
+    // §leaderboard — penalties for a rejected proof (and a duplicate flag), resolved
+    // before the tx and written inside it alongside the trust ding.
+    const lbConfig = await this.leaderboardConfig.getActive();
+    const lbSeasonKey = await this.leaderboardConfig.currentSeasonKey(now);
     await this.prisma.$transaction(async (tx) => {
       await tx.submission.update({
         where: { id: submissionId },
@@ -654,13 +806,25 @@ export class AdminService {
       // A rejected submission dings trust (−6, §4). The assignment stays open, so
       // this does not touch the completed/reliability counts.
       await this.scoring.recordDeliveryOutcome(submission.assignment.promoterId, 'REJECTED', now, tx);
+      // §leaderboard — dock points for the rejection, and again if it was a duplicate.
+      await this.points.award(
+        { promoterId: submission.assignment.promoterId, type: 'PENALTY_REJECTED', points: -lbConfig.penaltyRejected, dedupeKey: `PENALTY_REJECTED:${submissionId}`, seasonKey: lbSeasonKey, submissionId, assignmentId: submission.assignmentId, campaignId: submission.assignment.campaignId, occurredAt: now },
+        tx,
+      );
+      if (submission.autoFlag) {
+        await this.points.award(
+          { promoterId: submission.assignment.promoterId, type: 'PENALTY_DUPLICATE', points: -lbConfig.penaltyDuplicate, dedupeKey: `PENALTY_DUPLICATE:${submissionId}`, seasonKey: lbSeasonKey, submissionId, assignmentId: submission.assignmentId, campaignId: submission.assignment.campaignId, occurredAt: now },
+          tx,
+        );
+      }
+      await this.leaderboard.recomputeScore(submission.assignment.promoterId, now, tx);
       await this.notifications.create(
         {
           userId: submission.assignment.promoterId,
           type: 'submission.rejected',
           title: 'Submission needs another look',
           body: `Your proof was rejected: ${reason} You can resubmit before the deadline.`,
-          data: { submissionId, reason },
+          data: { submissionId, assignmentId: submission.assignmentId, reason },
           dedupeKey: `submission.rejected:${submissionId}`,
         },
         tx,
@@ -770,6 +934,12 @@ export class AdminService {
           where: { id: withdrawalId },
           data: { status: WithdrawalStatus.PAID, paidRef },
         });
+        // Tell the promoter their payout landed.
+        const t = templates.payoutSuccessful(formatNaira(withdrawal.amountMinor));
+        await this.notifications.create(
+          { userId: withdrawal.promoterId, type: t.type, title: t.title, body: t.body, dedupeKey: `payout.successful:${withdrawalId}` },
+          tx,
+        );
         await this.audit.record(
           {
             actorId: adminId,
@@ -955,6 +1125,7 @@ export class AdminService {
                 id: true, platform: true, handle: true, url: true, claimedAudience: true,
                 effectiveReach: true, verificationTier: true, verifiedAt: true,
                 isGroup: true, groupMembers: true, activeParticipants: true, status: true,
+                evidenceFile: { select: { id: true } },
               },
             },
           },
@@ -986,8 +1157,97 @@ export class AdminService {
         group_members: c.groupMembers,
         active_participants: c.activeParticipants,
         status: c.status,
+        // The screenshot the promoter uploaded for this channel (for screenshot verification).
+        screenshot_url: c.evidenceFile ? `/v1/files/${c.evidenceFile.id}` : null,
       })),
     })));
+  }
+
+  /** One promoter in full (any status) — for reviewing/approving channels and
+   *  deactivating from the directory, not just the approval queue. */
+  async promoterDetail(userId: string) {
+    const p = await this.prisma.promoterProfile.findUnique({
+      where: { userId },
+      include: {
+        user: {
+          select: {
+            email: true,
+            phoneE164: true,
+            channels: {
+              orderBy: { effectiveReach: 'desc' },
+              select: {
+                id: true, platform: true, handle: true, url: true, claimedAudience: true,
+                effectiveReach: true, verificationTier: true, verifiedAt: true,
+                isGroup: true, groupMembers: true, activeParticipants: true, status: true,
+                evidenceFile: { select: { id: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!p) throw new NotFoundException('No such promoter.');
+    return {
+      user_id: p.userId,
+      full_name: p.fullName,
+      location_state: p.locationState,
+      status: p.status,
+      trust_score: p.trustScore.toNumber(),
+      roles: p.roles,
+      capability_preview: await this.scoring.computeCapability(p.userId, {}, this.prisma),
+      email: p.user.email,
+      phone_e164: p.user.phoneE164,
+      channels: p.user.channels.map((c) => ({
+        id: c.id,
+        platform: c.platform,
+        handle: c.handle,
+        url: c.url,
+        claimed_audience: c.claimedAudience,
+        effective_reach: c.effectiveReach,
+        verification_tier: c.verificationTier,
+        verified_at: c.verifiedAt?.toISOString() ?? null,
+        is_group: c.isGroup,
+        group_members: c.groupMembers,
+        active_participants: c.activeParticipants,
+        status: c.status,
+        screenshot_url: c.evidenceFile ? `/v1/files/${c.evidenceFile.id}` : null,
+      })),
+    };
+  }
+
+  /**
+   * Every promoter, any status — the admin directory (distinct from the
+   * approval queue, which is AWAITING_APPROVAL only). A lightweight summary per
+   * promoter for a searchable table; the queue keeps the heavy per-channel detail.
+   */
+  async allPromoters() {
+    const rows = await this.prisma.promoterProfile.findMany({
+      include: {
+        user: {
+          select: {
+            email: true,
+            phoneE164: true,
+            createdAt: true,
+            channels: { orderBy: { effectiveReach: 'desc' }, select: { platform: true, effectiveReach: true } },
+          },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+    return rows.map((p) => ({
+      user_id: p.userId,
+      full_name: p.fullName,
+      email: p.user.email,
+      phone_e164: p.user.phoneE164,
+      status: p.status,
+      location_state: p.locationState,
+      trust_score: p.trustScore.toNumber(),
+      reliability: p.reliability.toNumber(),
+      channels_count: p.user.channels.length,
+      top_platform: p.user.channels[0]?.platform ?? null,
+      total_reach: p.user.channels.reduce((sum, c) => sum + c.effectiveReach, 0),
+      created_at: p.user.createdAt.toISOString(),
+    }));
   }
 
   async pendingCampaigns() {
@@ -1275,6 +1535,126 @@ export class AdminService {
     return { id: channelId, status: tier, message: `Channel verified at ${tier}.` };
   }
 
+  /**
+   * Approve a SINGLE channel (per-channel review, §7). The channel goes ACTIVE and
+   * the promoter's capability is recomputed. The promoter is activated as soon as
+   * their FIRST channel is approved — but they stay reviewable, so an admin can
+   * approve or reject the remaining channels afterwards.
+   */
+  async approveChannel(adminId: string, channelId: string): Promise<AdminDecisionDto> {
+    const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
+    if (!channel) throw new NotFoundException('No such channel.');
+    if (channel.status === ChannelStatus.ACTIVE) throw new ConflictException('That channel is already approved.');
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.channel.update({ where: { id: channelId }, data: { status: ChannelStatus.ACTIVE } });
+      await this.activatePromoterOnChannelChange(adminId, channel.promoterId, tx);
+      await this.audit.record(
+        {
+          actorId: adminId,
+          action: 'channel.approve',
+          entityType: 'channel',
+          entityId: channelId,
+          before: { status: channel.status },
+          after: { status: ChannelStatus.ACTIVE },
+        },
+        tx,
+      );
+    });
+    return { id: channelId, status: ChannelStatus.ACTIVE, message: 'Channel approved.' };
+  }
+
+  /** Reject a SINGLE channel — it is not matched on and its reach drops out of scoring. */
+  async rejectChannel(adminId: string, channelId: string, reason: string): Promise<AdminDecisionDto> {
+    const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
+    if (!channel) throw new NotFoundException('No such channel.');
+    if (channel.status === ChannelStatus.REJECTED) throw new ConflictException('That channel is already rejected.');
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.channel.update({ where: { id: channelId }, data: { status: ChannelStatus.REJECTED } });
+      // Recompute capability so a rejected channel's reach no longer counts.
+      const capabilityScores = await this.scoring.computeCapability(channel.promoterId, {}, tx);
+      await tx.promoterProfile.update({ where: { userId: channel.promoterId }, data: { capabilityScores } });
+      await this.audit.record(
+        {
+          actorId: adminId,
+          action: 'channel.reject',
+          entityType: 'channel',
+          entityId: channelId,
+          before: { status: channel.status },
+          after: { status: ChannelStatus.REJECTED },
+          reason,
+        },
+        tx,
+      );
+    });
+    return { id: channelId, status: ChannelStatus.REJECTED, message: 'Channel rejected.' };
+  }
+
+  /**
+   * After a channel is approved, recompute the promoter's capability and — if they
+   * were still awaiting approval — activate them and send the one-time welcome-to-
+   * offers notification. Idempotent: an already-ACTIVE promoter is just rescored.
+   */
+  private async activatePromoterOnChannelChange(adminId: string, promoterId: string, tx: Prisma.TransactionClient): Promise<void> {
+    const profile = await tx.promoterProfile.findUnique({ where: { userId: promoterId } });
+    if (!profile) return;
+    const now = new Date();
+    const capabilityScores = await this.scoring.computeCapability(promoterId, {}, tx);
+    const activating = profile.status === PromoterStatus.AWAITING_APPROVAL || profile.status === PromoterStatus.PROFILE_INCOMPLETE;
+    await tx.promoterProfile.update({
+      where: { userId: promoterId },
+      data: activating
+        ? { status: PromoterStatus.ACTIVE, approvedBy: adminId, approvedAt: now, capabilityScores, capabilityConfirmedBy: adminId, capabilityConfirmedAt: now }
+        : { capabilityScores },
+    });
+    if (activating) {
+      await this.notifications.create(
+        {
+          userId: promoterId,
+          type: 'promoter.approved',
+          title: "You're approved 🎉",
+          body: 'Your promoter profile is approved. Offers matched to your channels will start appearing in the app.',
+          data: {},
+          dedupeKey: `promoter.approved:${promoterId}`,
+        },
+        tx,
+      );
+    }
+  }
+
+  /**
+   * Deactivate or reactivate a promoter (mirrors client deactivate). Suspending
+   * excludes them from matching (profile → SUSPENDED) and blocks sign-in
+   * (user → SUSPENDED); reactivating restores both to ACTIVE.
+   */
+  async setPromoterStatus(adminId: string, userId: string, active: boolean): Promise<AdminDecisionDto> {
+    const profile = await this.prisma.promoterProfile.findUnique({ where: { userId } });
+    if (!profile) throw new NotFoundException('No promoter profile for that user.');
+    const nextProfile = active ? PromoterStatus.ACTIVE : PromoterStatus.SUSPENDED;
+
+    if (profile.status !== nextProfile) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.promoterProfile.update({ where: { userId }, data: { status: nextProfile } });
+        await tx.user.update({ where: { id: userId }, data: { status: active ? UserStatus.ACTIVE : UserStatus.SUSPENDED } });
+        const t = active ? templates.accountReactivated('PROMOTER') : templates.accountSuspended('PROMOTER');
+        await this.notifications.create({ userId, type: t.type, title: t.title, body: t.body, data: t.data }, tx);
+        await this.audit.record(
+          {
+            actorId: adminId,
+            action: active ? 'promoter.reactivate' : 'promoter.deactivate',
+            entityType: 'promoter_profile',
+            entityId: userId,
+            before: { status: profile.status },
+            after: { status: nextProfile },
+          },
+          tx,
+        );
+      });
+    }
+    return { id: userId, status: nextProfile, message: active ? 'Promoter reactivated.' : 'Promoter deactivated.' };
+  }
+
   /** Drop a channel back to self-reported (bad or stale proof): clears verified_at and re-caps reach. */
   async unverifyChannel(adminId: string, channelId: string, reason: string): Promise<AdminDecisionDto> {
     const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
@@ -1433,7 +1813,7 @@ export class AdminService {
   async clients() {
     const orgs = await this.prisma.clientOrg.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { owner: { select: { email: true } }, _count: { select: { campaigns: true } } },
+      include: { owner: { select: { email: true, phoneE164: true } }, _count: { select: { campaigns: true } } },
     });
     const spent = await this.prisma.campaign.groupBy({
       by: ['clientOrgId'],
@@ -1445,6 +1825,7 @@ export class AdminService {
       org_id: o.id,
       name: o.name,
       email: o.owner.email,
+      phone: o.phoneWhatsapp ?? o.owner.phoneE164 ?? null,
       industry: o.industry,
       status: o.status,
       campaigns_created: o._count.campaigns,
@@ -1458,10 +1839,20 @@ export class AdminService {
     if (!org) throw new NotFoundException('No such client.');
     await this.prisma.$transaction(async (tx) => {
       await tx.clientOrg.update({ where: { id: orgId }, data: { status } });
+      const suspended = status === ClientOrgStatus.SUSPENDED;
+      // Tell the owner — but only when the status actually changes, so a repeat
+      // click doesn't re-email (and a later re-suspension can email again).
+      if (org.status !== status) {
+        const t = suspended ? templates.accountSuspended('CLIENT') : templates.accountReactivated('CLIENT');
+        await this.notifications.create(
+          { userId: org.ownerUserId, type: t.type, title: t.title, body: t.body, data: t.data },
+          tx,
+        );
+      }
       await this.audit.record(
         {
           actorId: adminId,
-          action: status === ClientOrgStatus.SUSPENDED ? 'client.deactivate' : 'client.reactivate',
+          action: suspended ? 'client.deactivate' : 'client.reactivate',
           entityType: 'client_org',
           entityId: orgId,
           before: { status: org.status },
@@ -1531,6 +1922,103 @@ export class AdminService {
     return this.platformRules();
   }
 
+  // ── Leaderboard config + manual adjustments (Phase 4) ─────
+
+  /** The full promoter leaderboard for the admin console (real names). */
+  async promoterLeaderboard(limit = 100) {
+    return this.leaderboard.adminBoard(Math.min(Math.max(limit, 1), 500));
+  }
+
+  async leaderboardSettings() {
+    const c = await this.leaderboardConfig.getActive();
+    return {
+      pts_delivery_completed: c.ptsDeliveryCompleted,
+      pts_on_time: c.ptsOnTime,
+      pts_quality_clean: c.ptsQualityClean,
+      over_base: c.overBase,
+      over_cap_ratio: c.overCapRatio,
+      streak_step: c.streakStep,
+      streak_cap: c.streakCap,
+      pts_breadth: c.ptsBreadth,
+      pts_milestone: c.ptsMilestone,
+      penalty_no_show: c.penaltyNoShow,
+      penalty_rejected: c.penaltyRejected,
+      penalty_duplicate: c.penaltyDuplicate,
+      per_campaign_point_cap: c.perCampaignPointCap,
+      mult_creation_hundredths: c.multCreationHundredths,
+      mult_distribution_hundredths: c.multDistributionHundredths,
+      season_length_days: c.seasonLengthDays,
+      tier_silver_at: c.tierSilverAt,
+      tier_gold_at: c.tierGoldAt,
+      tier_platinum_at: c.tierPlatinumAt,
+      tier_reliability_floor: c.tierReliabilityFloor.toNumber(),
+    };
+  }
+
+  async updateLeaderboardConfig(adminId: string, dto: LeaderboardConfigUpdateDto) {
+    const c = await this.leaderboardConfig.getActive();
+    const data: Prisma.LeaderboardConfigUpdateInput = {};
+    if (dto.pts_delivery_completed !== undefined) data.ptsDeliveryCompleted = dto.pts_delivery_completed;
+    if (dto.pts_on_time !== undefined) data.ptsOnTime = dto.pts_on_time;
+    if (dto.pts_quality_clean !== undefined) data.ptsQualityClean = dto.pts_quality_clean;
+    if (dto.over_base !== undefined) data.overBase = dto.over_base;
+    if (dto.over_cap_ratio !== undefined) data.overCapRatio = dto.over_cap_ratio;
+    if (dto.streak_step !== undefined) data.streakStep = dto.streak_step;
+    if (dto.streak_cap !== undefined) data.streakCap = dto.streak_cap;
+    if (dto.pts_breadth !== undefined) data.ptsBreadth = dto.pts_breadth;
+    if (dto.pts_milestone !== undefined) data.ptsMilestone = dto.pts_milestone;
+    if (dto.penalty_no_show !== undefined) data.penaltyNoShow = dto.penalty_no_show;
+    if (dto.penalty_rejected !== undefined) data.penaltyRejected = dto.penalty_rejected;
+    if (dto.penalty_duplicate !== undefined) data.penaltyDuplicate = dto.penalty_duplicate;
+    if (dto.per_campaign_point_cap !== undefined) data.perCampaignPointCap = dto.per_campaign_point_cap;
+    if (dto.mult_creation_hundredths !== undefined) data.multCreationHundredths = dto.mult_creation_hundredths;
+    if (dto.mult_distribution_hundredths !== undefined) data.multDistributionHundredths = dto.mult_distribution_hundredths;
+    if (dto.season_length_days !== undefined) data.seasonLengthDays = dto.season_length_days;
+    if (dto.tier_silver_at !== undefined) data.tierSilverAt = dto.tier_silver_at;
+    if (dto.tier_gold_at !== undefined) data.tierGoldAt = dto.tier_gold_at;
+    if (dto.tier_platinum_at !== undefined) data.tierPlatinumAt = dto.tier_platinum_at;
+    if (dto.tier_reliability_floor !== undefined) data.tierReliabilityFloor = new Prisma.Decimal(dto.tier_reliability_floor);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.leaderboardConfig.update({ where: { id: c.id }, data });
+      await this.audit.record(
+        { actorId: adminId, action: 'leaderboard_config.update', entityType: 'leaderboard_config', entityId: c.id, after: dto },
+        tx,
+      );
+    });
+    return this.leaderboardSettings();
+  }
+
+  /** A manual leaderboard adjustment — award or dock points, audited. */
+  async adjustPromoterPoints(adminId: string, promoterId: string, dto: AdjustPointsDto) {
+    const promoter = await this.prisma.promoterProfile.findUnique({ where: { userId: promoterId }, select: { userId: true } });
+    if (!promoter) throw new NotFoundException('No such promoter.');
+
+    const now = new Date();
+    const seasonKey = await this.leaderboardConfig.currentSeasonKey(now);
+    await this.prisma.$transaction(async (tx) => {
+      await this.points.award(
+        {
+          promoterId,
+          type: 'ADJUSTMENT',
+          points: dto.points,
+          // Manual adjustments aren't tied to a source event, so each is distinct.
+          dedupeKey: `ADJUSTMENT:${randomUUID()}`,
+          seasonKey,
+          occurredAt: now,
+          metadata: { reason: dto.reason, by: adminId },
+        },
+        tx,
+      );
+      await this.leaderboard.recomputeScore(promoterId, now, tx);
+      await this.audit.record(
+        { actorId: adminId, action: 'leaderboard.adjust', entityType: 'promoter', entityId: promoterId, after: { points: dto.points, reason: dto.reason } },
+        tx,
+      );
+    });
+    return this.leaderboard.myScore(promoterId, now);
+  }
+
   async auditLog(limit = 50) {
     const rows = await this.prisma.auditLog.findMany({
       orderBy: { createdAt: 'desc' },
@@ -1554,12 +2042,25 @@ export class AdminService {
       include: { roles: { where: { role: Role.ADMIN }, select: { capabilities: true } } },
       orderBy: { createdAt: 'asc' },
     });
-    return admins.map((u) => ({
-      id: u.id,
-      email: u.email,
-      status: u.status,
-      capabilities: [...new Set(u.roles.flatMap((r) => r.capabilities))],
-    }));
+    const invites = await this.prisma.adminInvite.findMany({
+      where: { status: 'PENDING' },
+      orderBy: { createdAt: 'desc' },
+    });
+    return {
+      admins: admins.map((u) => ({
+        id: u.id,
+        email: u.email,
+        status: u.status,
+        capabilities: [...new Set(u.roles.flatMap((r) => r.capabilities))],
+      })),
+      pending_invites: invites.map((i) => ({
+        id: i.id,
+        email: i.email,
+        capabilities: i.capabilities,
+        expires_at: i.expiresAt.toISOString(),
+        created_at: i.createdAt.toISOString(),
+      })),
+    };
   }
 
   // ── Analytics: platform overview ─────────────────────────
@@ -1575,6 +2076,38 @@ export class AdminService {
       this.rateConfig.getActive(),
     ]);
 
+    // Spend by category: funded client spend grouped by the client's industry, so
+    // admins can see which kinds of business are driving GMV (what to scale vs trim).
+    const fundedCampaigns = await this.prisma.campaign.findMany({
+      where: { status: { in: FUNDED_STATUSES }, priceMinor: { not: null } },
+      select: { priceMinor: true, clientOrg: { select: { industry: true } } },
+    });
+    const categorySpend = new Map<string, bigint>();
+    for (const c of fundedCampaigns) {
+      const key = c.clientOrg?.industry?.trim() || 'Uncategorised';
+      categorySpend.set(key, (categorySpend.get(key) ?? 0n) + (c.priceMinor ?? 0n));
+    }
+    const spend_by_category = [...categorySpend.entries()]
+      .sort((a, b) => (b[1] > a[1] ? 1 : b[1] < a[1] ? -1 : 0))
+      .map(([category, minor]) => ({ category, spend: toMoney(minor) }));
+
+    // Promoter performance by role: fees earned (approved/paid work) and how many
+    // distinct campaigns each role delivered on — Creators vs Distributors vs others.
+    const settledAssignments = await this.prisma.assignment.findMany({
+      where: { status: { in: [AssignmentStatus.APPROVED, AssignmentStatus.PAID] } },
+      select: { role: true, feeMinor: true, campaignId: true },
+    });
+    const roleAgg = new Map<string, { earnings: bigint; campaigns: Set<string> }>();
+    for (const a of settledAssignments) {
+      const e = roleAgg.get(a.role) ?? { earnings: 0n, campaigns: new Set<string>() };
+      e.earnings += a.feeMinor;
+      e.campaigns.add(a.campaignId);
+      roleAgg.set(a.role, e);
+    }
+    const promoter_performance = [...roleAgg.entries()]
+      .map(([role, v]) => ({ role, earnings: toMoney(v.earnings), campaigns: v.campaigns.size }))
+      .sort((a, b) => b.earnings.amount_minor - a.earnings.amount_minor);
+
     // Ralia revenue is the balance of the platform revenue account.
     const revenueAcc = await this.prisma.account.findFirst({ where: { kind: AccountKind.RALIA_REVENUE, ownerId: null } });
     let revenue = 0n;
@@ -1589,6 +2122,46 @@ export class AdminService {
       revenue = cr - dr;
     }
 
+    // Weekly revenue vs commissions: the last 7 days, Revenue = client money funded
+    // that day (gateway payments), Profit = the platform revenue account's net that
+    // day. Bucketed in Africa/Lagos so day boundaries match the business's clock.
+    const TZ = 'Africa/Lagos';
+    const dayKey = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d); // YYYY-MM-DD
+    const dayLabel = (d: Date) => d.toLocaleDateString('en-NG', { weekday: 'short', timeZone: TZ });
+    const now = new Date();
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(now.getTime() - (6 - i) * 86_400_000);
+      return { key: dayKey(d), label: dayLabel(d) };
+    });
+    const windowStart = new Date(now.getTime() - 7 * 86_400_000);
+
+    const revByDay = new Map<string, bigint>();
+    const payments = await this.prisma.gatewayPayment.findMany({
+      where: { createdAt: { gte: windowStart } },
+      select: { gatewayMinor: true, createdAt: true },
+    });
+    for (const p of payments) revByDay.set(dayKey(p.createdAt), (revByDay.get(dayKey(p.createdAt)) ?? 0n) + p.gatewayMinor);
+
+    const profitByDay = new Map<string, bigint>();
+    if (revenueAcc) {
+      const entries = await this.prisma.ledgerEntry.findMany({
+        where: { accountId: revenueAcc.id, createdAt: { gte: windowStart } },
+        select: { direction: true, amountMinor: true, createdAt: true },
+      });
+      for (const e of entries) {
+        const k = dayKey(e.createdAt);
+        const signed = e.direction === EntryDirection.CREDIT ? e.amountMinor : -e.amountMinor;
+        profitByDay.set(k, (profitByDay.get(k) ?? 0n) + signed);
+      }
+    }
+
+    const weekly_revenue = days.map((d) => ({
+      day: d.label,
+      date: d.key,
+      revenue: toMoney(revByDay.get(d.key) ?? 0n),
+      profit: toMoney(profitByDay.get(d.key) ?? 0n),
+    }));
+
     return {
       gmv: toMoney(gmv._sum.priceMinor ?? 0n),
       revenue: toMoney(revenue),
@@ -1598,6 +2171,9 @@ export class AdminService {
       active_clients: activeClients,
       promoters_by_status: promotersByStatus.map((r) => ({ status: r.status, count: r._count._all })),
       campaigns_by_status: campaignsByStatus.map((r) => ({ status: r.status, count: r._count._all })),
+      spend_by_category,
+      promoter_performance,
+      weekly_revenue,
     };
   }
 }

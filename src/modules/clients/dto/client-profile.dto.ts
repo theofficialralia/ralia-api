@@ -108,6 +108,9 @@ export class ClientProfileDto {
   @ApiProperty({ type: [ClientSocialDto], nullable: true })
   socials!: ClientSocialDto[] | null;
 
+  @ApiProperty({ nullable: true, description: 'URL of the business logo, or null. Served by /v1/files/:id.' })
+  logo_url!: string | null;
+
   @ApiProperty({ example: 'ACTIVE' })
   status!: string;
 }

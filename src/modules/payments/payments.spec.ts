@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { JwtAuthGuard } from '../../common/auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/auth/roles.guard';
 import { IdempotencyGuard } from '../../common/idempotency/idempotency.guard';
+import { MarketingModule } from '../../common/marketing/marketing.module';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { PaymentsModule } from './payments.module';
@@ -47,7 +48,7 @@ describe('payments — Paystack verify + fund', () => {
     paystack = new StubPaystack();
 
     const moduleRef = await Test.createTestingModule({
-      imports: [ConfigModule.forRoot({ isGlobal: true }), JwtModule.register({}), PrismaModule, PaymentsModule],
+      imports: [ConfigModule.forRoot({ isGlobal: true }), JwtModule.register({}), PrismaModule, MarketingModule, PaymentsModule],
       providers: [
         { provide: APP_GUARD, useClass: JwtAuthGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
@@ -106,14 +107,15 @@ describe('payments — Paystack verify + fund', () => {
     return cr - d;
   }
 
-  it('funds the campaign and goes LIVE when Paystack confirms the exact amount', async () => {
+  it('funds the campaign and sends it to review (not live) when Paystack confirms', async () => {
     const { ownerId, campaignId } = await quotedCampaign();
     const res = await http().post(`/campaigns/${campaignId}/payments/paystack/verify`).set(bearer(ownerId)).set(key())
       .send({ reference: 'RLA-abc-123' }).expect(200);
 
-    expect(res.body.status).toBe('LIVE');
+    // Payment funds escrow and sends it to admin review — approval is what takes it live.
+    expect(res.body.status).toBe('PENDING_APPROVAL');
     const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-    expect(campaign.status).toBe(CampaignStatus.LIVE);
+    expect(campaign.status).toBe(CampaignStatus.PENDING_APPROVAL);
     expect(campaign.escrowAccountId).not.toBeNull();
     expect(await escrowBalance(campaignId)).toBe(PRICE);
     expect(await prisma.ledgerTransaction.count({ where: { kind: 'CAMPAIGN_FUNDING' } })).toBe(1);
@@ -125,6 +127,10 @@ describe('payments — Paystack verify + fund', () => {
     expect(gp.expectedMinor).toBe(PRICE);
     expect(gp.gatewayMinor).toBe(PRICE);
     expect(gp.ledgerTransactionId).not.toBeNull();
+
+    // Not live yet → no "campaign is live" email fires on payment.
+    const live = await prisma.notification.findFirst({ where: { userId: ownerId, type: 'campaign.live' } });
+    expect(live).toBeNull();
   });
 
   it('rejects a payment whose amount does not match the price', async () => {
@@ -178,6 +184,18 @@ describe('payments — Paystack verify + fund', () => {
       .send({ reference: 'RLA-y' }).expect(409);
   });
 
+  it('paying a quoted campaign sends it to review, and it cannot be funded once live', async () => {
+    const { ownerId, campaignId } = await quotedCampaign();
+    // A quoted campaign is fundable → payment takes it to review.
+    await http().post(`/campaigns/${campaignId}/payments/paystack/verify`).set(bearer(ownerId)).set(key())
+      .send({ reference: 'RLA-pay-1' }).expect(200);
+    expect((await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } })).status).toBe(CampaignStatus.PENDING_APPROVAL);
+    // Once an admin has taken it live, a fresh payment is refused.
+    await prisma.campaign.update({ where: { id: campaignId }, data: { status: CampaignStatus.LIVE } });
+    await http().post(`/campaigns/${campaignId}/payments/paystack/verify`).set(bearer(ownerId)).set(key())
+      .send({ reference: 'RLA-pay-2' }).expect(409);
+  });
+
   // ── Webhook backstop ─────────────────────────────────────
 
   const webhook = (body: unknown, signature: string) =>
@@ -189,7 +207,7 @@ describe('payments — Paystack verify + fund', () => {
     await webhook({ event: 'charge.success', data: { reference: 'RLA-hook-1', metadata: { campaign_id: campaignId } } }, 'good').expect(200);
 
     const c = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-    expect(c.status).toBe(CampaignStatus.LIVE);
+    expect(c.status).toBe(CampaignStatus.PENDING_APPROVAL);
     expect(await escrowBalance(campaignId)).toBe(PRICE);
   });
 

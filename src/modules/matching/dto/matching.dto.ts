@@ -75,6 +75,9 @@ export class OfferDto {
   @ApiProperty({ example: 2415, description: 'What the promoter earns, in kobo.' })
   fee_minor!: number;
 
+  @ApiProperty({ example: 1000, description: 'The target views this offer is priced for — what the promoter is expected to reach.' })
+  promised_reach!: number;
+
   @ApiProperty({ format: 'date-time' })
   expires_at!: string;
 

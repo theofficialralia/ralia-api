@@ -11,8 +11,10 @@ import { RolesGuard } from './common/auth/roles.guard';
 import { CryptoModule } from './common/crypto/crypto.module';
 import { IdempotencyGuard } from './common/idempotency/idempotency.guard';
 import { MailerModule } from './common/mailer/mailer.module';
+import { MarketingModule } from './common/marketing/marketing.module';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { RateConfigModule } from './common/rate-config/rate-config.module';
+import { LeaderboardModule } from './modules/leaderboard/leaderboard.module';
 import { StorageModule } from './common/storage/storage.module';
 import { HealthController } from './health/health.controller';
 import { AdminModule } from './modules/admin/admin.module';
@@ -72,8 +74,10 @@ import { WalletModule } from './modules/wallet/wallet.module';
     PrismaModule,
     CryptoModule,
     RateConfigModule,
+    LeaderboardModule,
     StorageModule,
     MailerModule,
+    MarketingModule,
     NotificationModule,
     IdentityModule,
     ProfilesModule,

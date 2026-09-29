@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, DefaultValuePipe, Get, Headers, HttpCode, HttpStatus, Param, ParseIntPipe, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { AdminCapability, ClientOrgStatus, Role } from '@prisma/client';
 import { ApiBearerAuth, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
@@ -7,6 +7,7 @@ import { RequiresCapability, Roles } from '../../common/auth/roles.guard';
 import { RequiresIdempotencyKey } from '../../common/idempotency/idempotency.guard';
 import { AdminService } from './admin.service';
 import { AdminDecisionDto, ApproveSubmissionDto, ExposureReportDto, FundCampaignDto, RateConfigUpdateDto, ReconciliationReportDto, RecordWithdrawalPaidDto, RejectDto, SetCapabilityDto, SetKycDto, SettleGatewayPaymentDto, VerifyChannelDto } from './dto/admin.dto';
+import { AdjustPointsDto, AdminLeaderboardDto, LeaderboardConfigUpdateDto } from '../leaderboard/dto/leaderboard.dto';
 
 /**
  * Admin console API.
@@ -29,6 +30,20 @@ export class AdminController {
   @ApiOperation({ summary: 'Promoters awaiting approval' })
   pendingPromoters() {
     return this.admin.pendingPromoters();
+  }
+
+  @Get('promoters')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'All promoters (directory, any status)' })
+  allPromoters() {
+    return this.admin.allPromoters();
+  }
+
+  @Get('promoters/:id')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'One promoter in full (channels + capability, any status)' })
+  promoterDetail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.admin.promoterDetail(id);
   }
 
   @Get('queues/campaigns')
@@ -204,6 +219,28 @@ export class AdminController {
     return this.admin.unverifyChannel(admin.id, id, dto.reason);
   }
 
+  @Post('channels/:id/approve')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Approve a single channel', description: 'Marks the channel ACTIVE. The promoter is activated on their first approved channel and stays reviewable so the rest can still be approved or rejected.' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  approveChannel(@CurrentUser() admin: AuthedUser, @Param('id', ParseUUIDPipe) id: string): Promise<AdminDecisionDto> {
+    return this.admin.approveChannel(admin.id, id);
+  }
+
+  @Post('channels/:id/reject')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Reject a single channel (reason required)', description: 'Marks the channel REJECTED so it is never matched on and its reach drops out of scoring.' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  rejectChannel(
+    @CurrentUser() admin: AuthedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectDto,
+  ): Promise<AdminDecisionDto> {
+    return this.admin.rejectChannel(admin.id, id, dto.reason);
+  }
+
   // ── Submissions ──────────────────────────────────────────
 
   @Post('submissions/:id/approve')
@@ -212,7 +249,7 @@ export class AdminController {
   @RequiresIdempotencyKey()
   @ApiOperation({
     summary: 'Approve proof and settle the promoter pro-rata',
-    description: 'Pays the promoter pro-rata on verified_views, takes Ralia’s cut, and refunds the undelivered remainder to the client — all in one balanced transaction. A delivery below the threshold is refused (reject instead). Requires an Idempotency-Key.',
+    description: 'Pays the promoter pro-rata on verified_views and takes Ralia’s cut on the delivered portion, in one balanced transaction. Any undelivered remainder stays in escrow to fund a reopen (or is retained by the platform at close) — there is no client refund. A delivery below the threshold is refused (reject instead). Requires an Idempotency-Key.',
   })
   @ApiOkResponse({ type: AdminDecisionDto })
   approveSubmission(
@@ -374,6 +411,24 @@ export class AdminController {
     return this.admin.setClientStatus(admin.id, id, ClientOrgStatus.ACTIVE);
   }
 
+  @Post('promoters/:id/deactivate')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Deactivate a promoter', description: 'Excludes them from matching and blocks sign-in, reversibly.' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  deactivatePromoter(@CurrentUser() admin: AuthedUser, @Param('id', ParseUUIDPipe) id: string): Promise<AdminDecisionDto> {
+    return this.admin.setPromoterStatus(admin.id, id, false);
+  }
+
+  @Post('promoters/:id/reactivate')
+  @HttpCode(HttpStatus.OK)
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Reactivate a promoter' })
+  @ApiOkResponse({ type: AdminDecisionDto })
+  reactivatePromoter(@CurrentUser() admin: AuthedUser, @Param('id', ParseUUIDPipe) id: string): Promise<AdminDecisionDto> {
+    return this.admin.setPromoterStatus(admin.id, id, true);
+  }
+
   // ── Settings ─────────────────────────────────────────────
 
   @Get('rate-config')
@@ -390,6 +445,35 @@ export class AdminController {
     return this.admin.updateRateConfig(admin.id, dto);
   }
 
+  @Get('leaderboard')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Promoter leaderboard', description: 'Full season standings — real names, season + lifetime points, tier and streak, ranked.' })
+  @ApiOkResponse({ type: AdminLeaderboardDto })
+  leaderboard(@Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit: number) {
+    return this.admin.promoterLeaderboard(limit);
+  }
+
+  @Get('leaderboard-config')
+  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
+  @ApiOperation({ summary: 'Leaderboard rules', description: 'The tunable point values, multipliers, caps, season length and tier thresholds.' })
+  leaderboardConfig() {
+    return this.admin.leaderboardSettings();
+  }
+
+  @Patch('leaderboard-config')
+  @RequiresCapability(AdminCapability.RECORD_MONEY)
+  @ApiOperation({ summary: 'Update leaderboard rules', description: 'Only the fields sent change. Audited.' })
+  updateLeaderboardConfig(@CurrentUser() admin: AuthedUser, @Body() dto: LeaderboardConfigUpdateDto) {
+    return this.admin.updateLeaderboardConfig(admin.id, dto);
+  }
+
+  @Post('promoters/:id/points')
+  @RequiresCapability(AdminCapability.RECORD_MONEY)
+  @ApiOperation({ summary: 'Adjust a promoter’s points', description: 'Award or dock leaderboard points manually. Audited.' })
+  adjustPoints(@CurrentUser() admin: AuthedUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: AdjustPointsDto) {
+    return this.admin.adjustPromoterPoints(admin.id, id, dto);
+  }
+
   @Get('audit-log')
   @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
   @ApiOperation({ summary: 'Audit log', description: 'Recent money- and score-affecting writes, attributed to the admin.' })
@@ -398,8 +482,7 @@ export class AdminController {
   }
 
   @Get('team')
-  @RequiresCapability(AdminCapability.REVIEW_EVIDENCE)
-  @ApiOperation({ summary: 'Admin team', description: 'Admins and their capabilities.' })
+  @ApiOperation({ summary: 'Admin team', description: 'Admins, their capabilities, and pending invites. Any admin may view; managing needs MANAGE_TEAM.' })
   team() {
     return this.admin.team();
   }

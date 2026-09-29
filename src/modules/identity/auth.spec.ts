@@ -9,6 +9,7 @@ import { JwtAuthGuard } from '../../common/auth/jwt-auth.guard';
 import { RolesGuard } from '../../common/auth/roles.guard';
 import { PrismaModule } from '../../common/prisma/prisma.module';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { GoogleAuthService } from './google-auth.service';
 import { IdentityModule } from './identity.module';
 import { OTP_PROVIDER, OtpProvider, OtpRecipient } from './providers/otp-provider';
 import { testPrisma } from '../../../test/test-db';
@@ -32,10 +33,21 @@ class CapturingOtpProvider implements OtpProvider {
   }
 }
 
+/** A stand-in for Google's verifier — the test sets what the next token resolves to. */
+class FakeGoogleAuth {
+  next: { email: string; emailVerified: boolean; name: string | null; sub: string } = {
+    email: 'g@example.com', emailVerified: true, name: 'G User', sub: 'sub-1',
+  };
+  verify(_idToken: string) {
+    return Promise.resolve(this.next);
+  }
+}
+
 describe('identity — auth', () => {
   let app: INestApplication;
   let prisma: PrismaClient;
   let otp: CapturingOtpProvider;
+  const google = new FakeGoogleAuth();
 
   const promoter = {
     email: 'ada@example.com',
@@ -73,6 +85,8 @@ describe('identity — auth', () => {
       .useValue(prisma)
       .overrideProvider(OTP_PROVIDER)
       .useValue(otp)
+      .overrideProvider(GoogleAuthService)
+      .useValue(google)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -88,7 +102,7 @@ describe('identity — auth', () => {
   beforeEach(async () => {
     otp.sent.length = 0;
     await prisma.$executeRawUnsafe(
-      'TRUNCATE users, user_roles, otp_codes, consents, sessions, client_orgs, promoter_profiles RESTART IDENTITY CASCADE',
+      'TRUNCATE users, user_roles, otp_codes, consents, sessions, client_orgs, promoter_profiles, notifications RESTART IDENTITY CASCADE',
     );
   });
 
@@ -103,6 +117,16 @@ describe('identity — auth', () => {
       .expect(200);
     return res.body as { access_token: string; refresh_token: string };
   }
+
+  it('sends the role-appropriate welcome once the account is verified', async () => {
+    await registerAndVerify(promoter);
+    await registerAndVerify(client);
+    const promoterWelcome = await prisma.notification.findFirst({ where: { type: 'welcome.promoter' } });
+    const clientWelcome = await prisma.notification.findFirst({ where: { type: 'welcome.client' } });
+    expect(promoterWelcome).not.toBeNull();
+    expect(clientWelcome).not.toBeNull();
+    expect(promoterWelcome!.title).toBe('Welcome to Ralia!');
+  });
 
   // ── The done-when ────────────────────────────────────────
 
@@ -362,5 +386,90 @@ describe('identity — auth', () => {
 
   it('change-password requires authentication', async () => {
     await http().post('/auth/change-password').send({ current_password: 'x', new_password: 'a long enough one' }).expect(401);
+  });
+
+  // ── Forgot / reset password (OTP-based) ──────────────────
+
+  /** The most recent PASSWORD_RESET code sent to a phone. */
+  const resetCode = (phone: string) => {
+    const found = [...otp.sent].reverse().find((s) => s.purpose === OtpPurpose.PASSWORD_RESET && s.to.phone === phone);
+    if (!found) throw new Error(`No reset code was sent to ${phone}`);
+    return found.code;
+  };
+
+  it('resets a forgotten password with the emailed code and logs in with the new one', async () => {
+    await registerAndVerify(promoter);
+
+    await http().post('/auth/password/forgot').send({ email: promoter.email }).expect(202);
+    const code = resetCode(promoter.phone_e164);
+    // The code is delivered to the account email, not just the phone.
+    const reset = [...otp.sent].reverse().find((s) => s.purpose === OtpPurpose.PASSWORD_RESET)!;
+    expect(reset.to.email).toBe(promoter.email);
+
+    await http().post('/auth/password/reset').send({ email: promoter.email, code, new_password: 'a brand new passphrase' }).expect(204);
+
+    await http().post('/auth/login').send({ email: promoter.email, password: promoter.password }).expect(401);
+    await http().post('/auth/login').send({ email: promoter.email, password: 'a brand new passphrase' }).expect(200);
+  });
+
+  it('does not reveal whether an email is registered', async () => {
+    const res = await http().post('/auth/password/forgot').send({ email: 'nobody@example.com' }).expect(202);
+    expect(res.body.accepted).toBe(true);
+    expect(otp.sent).toHaveLength(0); // nothing issued for an unknown email
+  });
+
+  it('rejects a wrong or already-used reset code', async () => {
+    await registerAndVerify(promoter);
+    await http().post('/auth/password/forgot').send({ email: promoter.email }).expect(202);
+    const code = resetCode(promoter.phone_e164);
+
+    await http().post('/auth/password/reset').send({ email: promoter.email, code: '000000', new_password: 'a brand new passphrase' }).expect(400);
+    // The real code still works after a wrong guess…
+    await http().post('/auth/password/reset').send({ email: promoter.email, code, new_password: 'a brand new passphrase' }).expect(204);
+    // …but not a second time (consumed).
+    await http().post('/auth/password/reset').send({ email: promoter.email, code, new_password: 'yet another passphrase' }).expect(400);
+  });
+
+  it('rejects a too-short new password', async () => {
+    await registerAndVerify(promoter);
+    await http().post('/auth/password/forgot').send({ email: promoter.email }).expect(202);
+    const code = resetCode(promoter.phone_e164);
+    await http().post('/auth/password/reset').send({ email: promoter.email, code, new_password: 'short' }).expect(400);
+  });
+
+  it('a reset revokes every existing session', async () => {
+    const tokens = await registerAndVerify(promoter);
+    await http().post('/auth/password/forgot').send({ email: promoter.email }).expect(202);
+    const code = resetCode(promoter.phone_e164);
+    await http().post('/auth/password/reset').send({ email: promoter.email, code, new_password: 'a brand new passphrase' }).expect(204);
+    // The refresh token issued before the reset is now dead.
+    await http().post('/auth/refresh').send({ refresh_token: tokens.refresh_token }).expect(401);
+  });
+
+  // ── Sign in with Google ──────────────────────────────────
+
+  it('creates an ACTIVE, phone-less promoter on first Google sign-in and returns tokens', async () => {
+    google.next = { email: 'newbie@gmail.com', emailVerified: true, name: 'New Bie', sub: 's-100' };
+    const res = await http().post('/auth/google').send({ id_token: 'tok', role: Role.PROMOTER }).expect(200);
+    expect(res.body.access_token).toBeTruthy();
+
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: 'newbie@gmail.com' }, include: { roles: true, promoterProfile: true } });
+    expect(user.status).toBe('ACTIVE');
+    expect(user.phoneE164).toBeNull();
+    expect(user.roles.map((r) => r.role)).toContain(Role.PROMOTER);
+    expect(user.promoterProfile).not.toBeNull();
+  });
+
+  it('logs an existing user in via Google without creating a duplicate', async () => {
+    google.next = { email: 'again@gmail.com', emailVerified: true, name: 'A Gain', sub: 's-1' };
+    await http().post('/auth/google').send({ id_token: 'tok', role: Role.PROMOTER }).expect(200);
+    await http().post('/auth/google').send({ id_token: 'tok', role: Role.PROMOTER }).expect(200);
+    expect(await prisma.user.count({ where: { email: 'again@gmail.com' } })).toBe(1);
+  });
+
+  it('refuses a Google account whose email is not verified', async () => {
+    google.next = { email: 'unverified@gmail.com', emailVerified: false, name: null, sub: 's-2' };
+    await http().post('/auth/google').send({ id_token: 'tok', role: Role.PROMOTER }).expect(400);
+    expect(await prisma.user.count({ where: { email: 'unverified@gmail.com' } })).toBe(0);
   });
 });

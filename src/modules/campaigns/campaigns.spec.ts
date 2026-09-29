@@ -157,6 +157,22 @@ describe('campaigns — draft, targeting, pricing', () => {
     return res.body.id;
   }
 
+  // ── Destination link (optional only for AWARENESS) ───────
+
+  it('allows an AWARENESS campaign with no destination link (views-only)', async () => {
+    const res = await http().post('/campaigns').set(auth())
+      .send({ name: 'Just Reach', objective: CampaignObjective.AWARENESS, slots_total: 5 })
+      .expect(201);
+    expect(res.body.destination_url).toBeNull();
+  });
+
+  it('allows any objective with no destination link (owner uploads creative instead)', async () => {
+    const res = await http().post('/campaigns').set(auth())
+      .send({ name: 'Buy Now', objective: CampaignObjective.PURCHASE, slots_total: 5 })
+      .expect(201);
+    expect(res.body.destination_url).toBeNull();
+  });
+
   // ── Lifecycle ────────────────────────────────────────────
 
   it('creates a draft with an empty targeting row', async () => {
@@ -179,19 +195,19 @@ describe('campaigns — draft, targeting, pricing', () => {
     const q = await http().post(`/campaigns/${id}/quote`).set(auth()).expect(201);
 
     // reach basis 1000, awareness 1.0, 3 active filters (states, platforms, minReach)
-    // → targeting_mult 1.15. Distribution slot (default role) → RPM 300,000/1,000.
-    // unit = (1000/1000)×300000×1.0×1.15 = 345000. ×10 = 3,450,000 (≥ ₦15k floor).
+    // → targeting_mult 1.15. Distribution slot (default role) → RPM 375,000/1,000.
+    // unit = (1000/1000)×375000×1.0×1.15 = 431250. ×10 = 4,312,500 (≥ ₦15k floor).
     expect(q.body.active_filters).toBe(3);
-    expect(q.body.unit_price.amount_minor).toBe(345000);
-    expect(q.body.price.amount_minor).toBe(3450000);
-    // promoter keeps 50%: round(345000 × 0.5) = 172500
-    expect(q.body.promoter_fee.amount_minor).toBe(172500);
+    expect(q.body.unit_price.amount_minor).toBe(431250);
+    expect(q.body.price.amount_minor).toBe(4312500);
+    // promoter keeps 50%: round(431250 × 0.5) = 215625
+    expect(q.body.promoter_fee.amount_minor).toBe(215625);
     expect(q.body.eligible_promoters).toBe(5);
     expect(q.body.estimated_reach).toBeGreaterThan(0);
 
     const after = await http().get(`/campaigns/${id}`).set(auth()).expect(200);
     expect(after.body.status).toBe(CampaignStatus.QUOTED);
-    expect(after.body.price.amount_minor).toBe(3450000);
+    expect(after.body.price.amount_minor).toBe(4312500);
     expect(after.body.quoted_at).not.toBeNull();
   });
 
@@ -201,24 +217,24 @@ describe('campaigns — draft, targeting, pricing', () => {
       .send({ states: ['Lagos'], platforms: ['INSTAGRAM'], min_effective_reach: 1000 })
       .expect(200);
 
-    // unit = 345000 (as above). Budget 2,000,000 → floor(2000000/345000) = 5 slots, reach 5×1000.
+    // unit = 431250 (as above). Budget 2,000,000 → floor(2000000/431250) = 4 slots, reach 4×1000.
     const byBudget = await http().post(`/campaigns/${id}/plan`).set(auth()).send({ budget_minor: 2000000 }).expect(200);
-    expect(byBudget.body.unit_price.amount_minor).toBe(345000);
-    expect(byBudget.body.slots).toBe(5);
+    expect(byBudget.body.unit_price.amount_minor).toBe(431250);
+    expect(byBudget.body.slots).toBe(4);
     expect(byBudget.body.total_price.amount_minor).toBe(1725000);
-    expect(byBudget.body.estimated_total_reach).toBe(5000);
+    expect(byBudget.body.estimated_total_reach).toBe(4000);
     // Distribution floor surfaced for the slider: ₦15,000 = 1,500,000 kobo,
-    // ceil(1,500,000 / 345,000) = 5 slots. This plan (5 slots) meets it.
+    // ceil(1,500,000 / 431,250) = 4 slots. This plan (4 slots) meets it.
     expect(byBudget.body.category).toBe('DISTRIBUTION');
     expect(byBudget.body.floor_minor.amount_minor).toBe(1500000);
-    expect(byBudget.body.min_slots).toBe(5);
+    expect(byBudget.body.min_slots).toBe(4);
     expect(byBudget.body.meets_floor).toBe(true);
-    expect(byBudget.body.default_promoters).toBe(5);
+    expect(byBudget.body.default_promoters).toBe(4);
     expect(byBudget.body.default_reach_per_slot).toBe(1000);
 
     // Driving by slots prices them directly.
     const bySlots = await http().post(`/campaigns/${id}/plan`).set(auth()).send({ slots: 8 }).expect(200);
-    expect(bySlots.body.total_price.amount_minor).toBe(2760000);
+    expect(bySlots.body.total_price.amount_minor).toBe(3450000);
     expect(bySlots.body.estimated_total_reach).toBe(8000);
 
     // The preview persisted nothing: the campaign is still an unpriced DRAFT.
@@ -265,26 +281,38 @@ describe('campaigns — draft, targeting, pricing', () => {
 
   it('quotes at the category default reach when none is set', async () => {
     const id = await createDraft();
-    // No targeting/role → Distribution category, default reach 1,000 at RPM 300,000
-    // → unit 300,000. 12 slots = 3,600,000, clears the ₦15k floor.
+    // No targeting/role → Distribution category, default reach 1,000 at RPM 375,000
+    // → unit 375,000. 12 slots = 4,500,000, clears the ₦15k floor.
     const q = await http().post(`/campaigns/${id}/quote`).set(auth()).expect(201);
-    expect(q.body.unit_price.amount_minor).toBe(300000);
+    expect(q.body.unit_price.amount_minor).toBe(375000);
   });
 
-  it('moves a quoted campaign to PENDING_APPROVAL on submit', async () => {
+  it('price-driven quote charges the exact amount and derives the promoter count', async () => {
     const id = await createDraft();
-    await http().put(`/campaigns/${id}/targeting`).set(auth()).send({ min_effective_reach: 1000 }).expect(200);
+    // AWARENESS, RPM 375,000, default reach 1,000/slot: ₦30,000 buys 8,000 reach
+    // ÷ 1,000 = 8 promoters. The price is frozen exactly — never snapped.
+    const q = await http().post(`/campaigns/${id}/quote`).set(auth()).send({ price_minor: 3_000_000 }).expect(201);
+    expect(q.body.price.amount_minor).toBe(3_000_000);
+    expect(q.body.slots_total).toBe(8);
+    expect(q.body.unit_price.amount_minor).toBe(375_000);
+  });
+
+  it('rejects a price-driven quote below the category floor', async () => {
+    const id = await createDraft();
+    // ₦10,000 < the ₦15,000 Distribution floor — a clear rejection, never a silent bump.
+    await http().post(`/campaigns/${id}/quote`).set(auth()).send({ price_minor: 1_000_000 }).expect(400);
+  });
+
+  it('resubmit is only for a sent-back (REJECTED) campaign; a quoted one goes to review by paying', async () => {
+    const id = await createDraft();
     await http().post(`/campaigns/${id}/quote`).set(auth()).expect(201);
+    // Payment is the path to review now — a quoted campaign can't be "submitted".
+    await http().post(`/campaigns/${id}/submit`).set(auth()).expect(400);
+
+    // A campaign an admin sent back for changes can be resubmitted (money is held).
+    await prisma.campaign.update({ where: { id }, data: { status: CampaignStatus.REJECTED } });
     const res = await http().post(`/campaigns/${id}/submit`).set(auth()).expect(201);
     expect(res.body.status).toBe(CampaignStatus.PENDING_APPROVAL);
-
-    // A pending campaign is no longer editable.
-    await http().patch(`/campaigns/${id}`).set(auth()).send({ name: 'x' }).expect(400);
-  });
-
-  it('cannot submit a campaign that was never quoted', async () => {
-    const id = await createDraft();
-    await http().post(`/campaigns/${id}/submit`).set(auth()).expect(400);
   });
 
   // ── Estimate reflects targeting ──────────────────────────

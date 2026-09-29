@@ -238,13 +238,13 @@ describe('profiles — questionnaire, channels, bank', () => {
     await authed()
       .post('/promoters/me/channels')
       .set(bearer())
-      .send({ platform: Platform.INSTAGRAM, claimed_audience: 10_000, verification_tier: 'INSIGHTS' })
+      .send({ platform: Platform.INSTAGRAM, handle: 'h', claimed_audience: 10_000, verification_tier: 'INSIGHTS' })
       .expect(400);
 
     await authed()
       .post('/promoters/me/channels')
       .set(bearer())
-      .send({ platform: Platform.INSTAGRAM, claimed_audience: 10_000, effective_reach: 999_999 })
+      .send({ platform: Platform.INSTAGRAM, handle: 'h', claimed_audience: 10_000, effective_reach: 999_999 })
       .expect(400);
   });
 
@@ -255,7 +255,7 @@ describe('profiles — questionnaire, channels, bank', () => {
     const res = await authed()
       .post('/promoters/me/channels')
       .set(bearer())
-      .send({ platform: Platform.INSTAGRAM, claimed_audience: 10_000 })
+      .send({ platform: Platform.INSTAGRAM, handle: 'h', claimed_audience: 10_000 })
       .expect(201);
 
     // 10,000 × 0.05 × 0.6 = 300, versus 600 on the default factor.
@@ -328,7 +328,7 @@ describe('profiles — questionnaire, channels, bank', () => {
     const mine = await authed()
       .post('/promoters/me/channels')
       .set(bearer())
-      .send({ platform: Platform.TIKTOK, claimed_audience: 5000 })
+      .send({ platform: Platform.TIKTOK, handle: 'h', claimed_audience: 5000 })
       .expect(201);
 
     expect((await authed().get('/promoters/me/channels').set(bearer()).expect(200)).body).toHaveLength(1);
@@ -350,7 +350,7 @@ describe('profiles — questionnaire, channels, bank', () => {
     const res = await authed()
       .post('/promoters/me/channels')
       .set(bearer())
-      .send({ platform: Platform.TIKTOK, claimed_audience: 5000 })
+      .send({ platform: Platform.TIKTOK, handle: 'h', claimed_audience: 5000 })
       .expect(201);
     await prisma.channel.update({ where: { id: res.body.id }, data: { adminFrozen: true } });
 
@@ -361,7 +361,7 @@ describe('profiles — questionnaire, channels, bank', () => {
     await authed()
       .post('/promoters/me/channels')
       .set(bearer())
-      .send({ platform: Platform.WHATSAPP_GROUP, claimed_audience: 500, is_group: true })
+      .send({ platform: Platform.WHATSAPP_GROUP, handle: 'h', claimed_audience: 500, is_group: true })
       .expect(400);
 
     await authed()
@@ -409,6 +409,35 @@ describe('profiles — questionnaire, channels, bank', () => {
       .set(bearer())
       .send({ bank_code: 'GTB', account_number: '0123456789', account_name: 'ADA' })
       .expect(400);
+  });
+
+  it('refuses a bank account whose holder name doesn’t match the promoter', async () => {
+    await prisma.promoterProfile.update({ where: { userId }, data: { fullName: 'Ada Okafor' } });
+    // A totally different holder name is rejected…
+    await authed().post('/promoters/me/bank').set(bearer())
+      .send({ bank_code: '058', account_number: '0123456789', account_name: 'John Smith' }).expect(400);
+    // …but a shared name token (different order / middle name) is fine.
+    await authed().post('/promoters/me/bank').set(bearer())
+      .send({ bank_code: '058', account_number: '0123456789', account_name: 'OKAFOR ADA CHIOMA' }).expect(201);
+  });
+
+  it('refuses to link the same bank account to a second identity (anti-Sybil)', async () => {
+    const bank = { bank_code: '058', account_number: '0123456789', account_name: 'ADA OKAFOR' };
+    // The first promoter links the account fine.
+    await authed().post('/promoters/me/bank').set(bearer()).send(bank).expect(201);
+
+    // A second, distinct promoter tries the very same account → conflict.
+    const p2 = { ...promoter, email: 'sybil@example.com', phone_e164: '+2348012345000' };
+    const reg = await authed().post('/auth/register').send(p2).expect(201);
+    void reg;
+    const verify = await authed().post('/auth/otp/verify')
+      .send({ phone_e164: p2.phone_e164, code: otp.last(p2.phone_e164) }).expect(200);
+    const token2 = verify.body.access_token;
+
+    await authed().post('/promoters/me/bank').set({ Authorization: `Bearer ${token2}` }).send(bank).expect(409);
+
+    // The same person may still re-add their own account.
+    await authed().post('/promoters/me/bank').set(bearer()).send(bank).expect(201);
   });
 
   it('keeps exactly one default when a second account is added', async () => {
