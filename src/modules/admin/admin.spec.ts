@@ -90,9 +90,10 @@ describe('admin — decisions, money and audit', () => {
 
   beforeEach(async () => {
     await prisma.$executeRawUnsafe(
-      'TRUNCATE users, user_roles, promoter_profiles, promoter_bank_accounts, channels, client_orgs, campaigns, campaign_slots, offers, assignments, submissions, proof_artifacts, files, withdrawals, accounts, ledger_transactions, ledger_entries, audit_log, rate_config RESTART IDENTITY CASCADE',
+      'TRUNCATE users, user_roles, promoter_profiles, promoter_bank_accounts, channels, client_orgs, campaigns, campaign_slots, offers, assignments, submissions, proof_artifacts, files, withdrawals, accounts, ledger_transactions, ledger_entries, audit_log, point_events, promoter_scores, rate_config, leaderboard_config RESTART IDENTITY CASCADE',
     );
     await prisma.rateConfig.create({ data: { isActive: true } });
+    await prisma.leaderboardConfig.create({ data: {} });
     // The singleton platform accounts the seed normally creates.
     await prisma.account.create({ data: { kind: AccountKind.BANK_CLEARING } });
     await prisma.account.create({ data: { kind: AccountKind.RALIA_REVENUE } });
@@ -165,8 +166,8 @@ describe('admin — decisions, money and audit', () => {
 
     await http().post(`/admin/campaigns/${campaignId}/fund`).set(bearer(adminId, [Role.ADMIN])).set(key())
       .send({ amount_minor: Number(UNIT_PRICE) }).expect(200);
-
-    // Funding takes it live and notifies the campaign owner (N-5).
+    // Payment funds escrow → review; approval takes it live and emits campaign.live.
+    await http().post(`/admin/campaigns/${campaignId}/approve`).set(bearer(adminId, [Role.ADMIN])).expect(200);
     const liveNote = await prisma.notification.findFirstOrThrow({ where: { type: 'campaign.live' } });
     expect(liveNote.body).toMatch(/live/i);
 
@@ -257,13 +258,16 @@ describe('admin — decisions, money and audit', () => {
     const escrow = await prisma.account.findFirstOrThrow({ where: { kind: AccountKind.CAMPAIGN_ESCROW } });
 
     // promised 1000, verified 800 (≥ 70%). delivered_gross = 3450×800/1000 = 2760;
-    // fee = round(2760×0.5) = 1380. Ralia keeps the rest of the slot gross: 3450 − 1380 = 2070.
+    // fee = round(2760×0.5) = 1380, take on the delivered portion = 2760 − 1380 = 1380.
+    // The undelivered 690 kobo stays in escrow (§auto-reopen) — but this campaign has no
+    // reach target and no work left, so it fulfils and the 690 is swept to revenue at
+    // close: revenue = 1380 (take) + 690 (retained remainder) = 2070. No client refund.
     await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: 800 }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
 
     expect(await balanceOf(AccountKind.PROMOTER_AVAILABLE, promoterId)).toBe(1380n);
-    expect(await balanceOf(AccountKind.RALIA_REVENUE)).toBe(2070n); // take on delivered + undelivered remainder
+    expect(await balanceOf(AccountKind.RALIA_REVENUE)).toBe(2070n); // 1380 pro-rata take + 690 retained at fulfilment
     expect(await balanceOf(AccountKind.CLIENT_WALLET, campaign.clientOrgId)).toBe(0n); // no refund — no client wallet
-    expect(await balanceOfAccount(escrow.id, AccountKind.CAMPAIGN_ESCROW)).toBe(0n); // 1380 + 2070 = 3450
+    expect(await balanceOfAccount(escrow.id, AccountKind.CAMPAIGN_ESCROW)).toBe(0n); // 1380 + 1380 paid out, 690 swept
 
     const submission = await prisma.submission.findUniqueOrThrow({ where: { id: submissionId } });
     expect(submission.verifiedReach).toBe(800);
@@ -277,6 +281,88 @@ describe('admin — decisions, money and audit', () => {
     expect(verified?.body).toMatch(/verified views/i);
     const fulfilled = await prisma.notification.findFirst({ where: { userId: ownerId, type: 'campaign.fulfilled' } });
     expect(fulfilled?.body).toMatch(/complete/i);
+  });
+
+  it('fulfils a campaign early once verified reach meets the target, even with slots still open', async () => {
+    const { submissionId, campaignId, adminId } = await makePendingSubmission();
+    // Target the client paid for is low, and there is another slot still open — so the
+    // slot-based path would NOT complete, but the reach target is met on this approval.
+    await prisma.campaign.update({ where: { id: campaignId }, data: { targetReach: 500 } });
+    await prisma.campaignSlot.create({ data: { campaignId, role: PromoterRole.DISTRIBUTOR, unitPriceMinor: 1n, status: SlotStatus.OPEN } });
+
+    await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: 800 }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+
+    const done = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+    expect(done.status).toBe(CampaignStatus.FULFILLED); // 800 verified ≥ 500 target
+    expect(await prisma.campaignSlot.count({ where: { campaignId, status: SlotStatus.OPEN } })).toBe(1); // slot stayed open
+  });
+
+  it('reopens more slots at no extra charge when verified reach falls short and escrow can fund it', async () => {
+    const adminId = await makeAdmin();
+    const promoterId = await makePromoter();
+    // Funded for two slots' worth of escrow but sized as one slot, targeting 2,000 reach.
+    // One promoter delivers a full 1,000 — half the target — so with a second slot's worth
+    // of escrow still on hand the campaign must REOPEN rather than settle short.
+    const n = seq++;
+    const owner = await prisma.user.create({ data: { email: `rc${n}@x.com`, phoneE164: `+23482${String(n).padStart(8, '0')}`, passwordHash: 'x' } });
+    const org = await prisma.clientOrg.create({ data: { ownerUserId: owner.id, name: `ROrg${n}` } });
+    const campaign = await prisma.campaign.create({
+      data: {
+        clientOrgId: org.id, name: `RC${n}`, objective: CampaignObjective.AWARENESS,
+        destinationUrl: 'https://x.example/go', status: CampaignStatus.CONFIRMING_PAYMENT,
+        budgetMinor: UNIT_PRICE * 2n, priceMinor: UNIT_PRICE * 2n, slotsTotal: 1, targetReach: 2000, quotedAt: new Date(),
+        slots: { create: [{ role: PromoterRole.DISTRIBUTOR, unitPriceMinor: UNIT_PRICE, status: SlotStatus.OPEN }] },
+      },
+    });
+    await http().post(`/admin/campaigns/${campaign.id}/fund`).set(bearer(adminId, [Role.ADMIN])).set(key()).send({ amount_minor: Number(UNIT_PRICE * 2n) }).expect(200);
+    await http().post(`/admin/campaigns/${campaign.id}/approve`).set(bearer(adminId, [Role.ADMIN])).expect(200);
+
+    const channel = await prisma.channel.findFirstOrThrow({ where: { promoterId } });
+    const slot = await prisma.campaignSlot.findFirstOrThrow({ where: { campaignId: campaign.id } });
+    const offer = await prisma.offer.create({
+      data: { campaignId: campaign.id, promoterId, channelId: channel.id, role: PromoterRole.DISTRIBUTOR, feeMinor: FEE, grossMinor: UNIT_PRICE, promisedReach: PROMISED, expiresAt: new Date(Date.now() + 1e6), status: 'ACCEPTED' },
+    });
+    const assignment = await prisma.assignment.create({
+      data: {
+        offerId: offer.id, campaignId: campaign.id, promoterId, channelId: channel.id, slotId: slot.id,
+        role: PromoterRole.DISTRIBUTOR, feeMinor: FEE, grossMinor: UNIT_PRICE, promisedReach: PROMISED,
+        trackingToken: randomBytes(12).toString('base64url'), status: AssignmentStatus.SUBMITTED,
+      },
+    });
+    await prisma.campaignSlot.update({ where: { id: slot.id }, data: { status: SlotStatus.FILLED } });
+    const submission = await prisma.submission.create({ data: { assignmentId: assignment.id, verdict: Verdict.PENDING } });
+
+    await http().post(`/admin/submissions/${submission.id}/approve`).send({ verified_views: PROMISED }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+
+    const after = await prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id } });
+    expect(after.status).toBe(CampaignStatus.LIVE); // target not met → not fulfilled
+    expect(after.slotsTotal).toBe(2); // one more slot opened to close the gap
+    expect(await prisma.campaignSlot.count({ where: { campaignId: campaign.id, status: SlotStatus.OPEN } })).toBe(1);
+    // Escrow keeps the reopened slot's funding — nothing swept to revenue while still live.
+    expect(await balanceOfAccount(after.escrowAccountId!, AccountKind.CAMPAIGN_ESCROW)).toBe(UNIT_PRICE); // second slot's worth still held
+    const reopened = await prisma.notification.findFirst({ where: { userId: owner.id, type: 'campaign.reopened' } });
+    expect(reopened?.body).toMatch(/matching new promoters/i);
+  });
+
+  it('awards leaderboard points on approval, including over-delivery', async () => {
+    const { submissionId, promoterId, campaignId, adminId } = await makePendingSubmission();
+    // Verified 2000 vs promised 1000 = 2x over-delivery.
+    await http().post(`/admin/submissions/${submissionId}/approve`).send({ verified_views: 2000 }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+
+    const events = await prisma.pointEvent.findMany({ where: { promoterId, campaignId } });
+    const byType = new Map(events.map((e) => [e.type, e.points]));
+    expect(byType.get('DELIVERY_COMPLETED')).toBe(50);
+    expect(byType.get('OVER_DELIVERY')).toBe(30); // overBase 30 × (2 − 1)
+    expect(byType.has('QUALITY_CLEAN')).toBe(true);
+    // One award per type per submission (dedupe on the point ledger).
+    expect(await prisma.pointEvent.count({ where: { promoterId, campaignId, type: 'DELIVERY_COMPLETED' } })).toBe(1);
+  });
+
+  it('docks leaderboard points when a submission is rejected', async () => {
+    const { submissionId, promoterId, adminId } = await makePendingSubmission();
+    await http().post(`/admin/submissions/${submissionId}/reject`).send({ reason: 'Screenshot is cropped.' }).set(bearer(adminId, [Role.ADMIN])).set(key()).expect(200);
+    const penalty = await prisma.pointEvent.findFirst({ where: { promoterId, type: 'PENALTY_REJECTED' } });
+    expect(penalty?.points).toBe(-20);
   });
 
   it('a delivery below the threshold is refused and moves no money', async () => {
@@ -345,6 +431,39 @@ describe('admin — decisions, money and audit', () => {
     // reach 2000/3000=.667×.5 + postingFrequency 1×.2 + proof SCREENSHOT .8×.3 = .773 → 77.
     expect((p.capabilityScores as Record<string, number>).DISTRIBUTOR).toBe(77);
     expect(p.capabilityConfirmedBy).toBe(adminId);
+  });
+
+  it('approves a single channel, activating the promoter but leaving the rest reviewable', async () => {
+    const adminId = await makeAdmin();
+    const promoterId = await makePromoter(PromoterStatus.AWAITING_APPROVAL);
+    // A second, still-pending channel alongside the one makePromoter created.
+    const second = await prisma.channel.create({
+      data: { promoterId, platform: Platform.TIKTOK, claimedAudience: 5000, effectiveReach: 500, status: ChannelStatus.PENDING_REVIEW },
+    });
+    const first = await prisma.channel.findFirstOrThrow({ where: { promoterId, platform: Platform.INSTAGRAM } });
+
+    await http().post(`/admin/channels/${first.id}/approve`).set(bearer(adminId, [Role.ADMIN])).expect(200);
+
+    // Promoter is now active, but the second channel is still pending and approvable.
+    expect((await prisma.promoterProfile.findUniqueOrThrow({ where: { userId: promoterId } })).status).toBe(PromoterStatus.ACTIVE);
+    expect((await prisma.channel.findUniqueOrThrow({ where: { id: first.id } })).status).toBe(ChannelStatus.ACTIVE);
+    expect((await prisma.channel.findUniqueOrThrow({ where: { id: second.id } })).status).toBe(ChannelStatus.PENDING_REVIEW);
+
+    await http().post(`/admin/channels/${second.id}/reject`).send({ reason: 'Screenshot unreadable.' }).set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect((await prisma.channel.findUniqueOrThrow({ where: { id: second.id } })).status).toBe(ChannelStatus.REJECTED);
+  });
+
+  it('deactivates and reactivates a promoter (blocks matching + sign-in, reversibly)', async () => {
+    const adminId = await makeAdmin();
+    const promoterId = await makePromoter();
+
+    await http().post(`/admin/promoters/${promoterId}/deactivate`).set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect((await prisma.promoterProfile.findUniqueOrThrow({ where: { userId: promoterId } })).status).toBe(PromoterStatus.SUSPENDED);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: promoterId } })).status).toBe('SUSPENDED');
+
+    await http().post(`/admin/promoters/${promoterId}/reactivate`).set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect((await prisma.promoterProfile.findUniqueOrThrow({ where: { userId: promoterId } })).status).toBe(PromoterStatus.ACTIVE);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: promoterId } })).status).toBe('ACTIVE');
   });
 
   it('lets an admin override a promoter’s capability', async () => {
@@ -507,15 +626,21 @@ describe('admin — decisions, money and audit', () => {
     expect(campaign.status).toBe(CampaignStatus.CONFIRMING_PAYMENT); // unchanged
   });
 
-  it('funding makes the campaign LIVE', async () => {
+  it('funding sends the campaign to review, then approval makes it LIVE', async () => {
     const adminId = await makeAdmin();
     const campaignId = await makeApprovedCampaign(1);
     await http().post(`/admin/campaigns/${campaignId}/fund`).set(bearer(adminId, [Role.ADMIN])).set(key())
       .send({ amount_minor: Number(UNIT_PRICE) }).expect(200);
 
-    const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
-    expect(campaign.status).toBe(CampaignStatus.LIVE);
+    // Payment (bank transfer recorded) funds escrow and queues it for review.
+    let campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+    expect(campaign.status).toBe(CampaignStatus.PENDING_APPROVAL);
     expect(campaign.escrowAccountId).not.toBeNull();
+
+    // Approval is the final gate → LIVE.
+    await http().post(`/admin/campaigns/${campaignId}/approve`).set(bearer(adminId, [Role.ADMIN])).expect(200);
+    campaign = await prisma.campaign.findUniqueOrThrow({ where: { id: campaignId } });
+    expect(campaign.status).toBe(CampaignStatus.LIVE);
   });
 
   // ── Rejections require a reason ──────────────────────────
@@ -605,6 +730,7 @@ describe('admin — decisions, money and audit', () => {
     const campaignId = await makeApprovedCampaign(1);
     await http().post(`/admin/campaigns/${campaignId}/fund`).set(bearer(adminId, [Role.ADMIN])).set(key())
       .send({ amount_minor: Number(UNIT_PRICE) }).expect(200);
+    await http().post(`/admin/campaigns/${campaignId}/approve`).set(bearer(adminId, [Role.ADMIN])).expect(200);
     const channel = await prisma.channel.findFirstOrThrow({ where: { promoterId } });
     const slot = await prisma.campaignSlot.findFirstOrThrow({ where: { campaignId } });
     const offer = await prisma.offer.create({
@@ -786,6 +912,45 @@ describe('admin — decisions, money and audit', () => {
     expect(after.body.take_rate_pct).toBe(25);
     expect(after.body.delivery_threshold_pct).toBe(60);
     expect(await prisma.auditLog.count({ where: { action: 'rate_config.update' } })).toBe(1);
+  });
+
+  it('shows the promoter leaderboard, ranked, with real names', async () => {
+    const adminId = await makeAdmin();
+    const a = await makePromoter();
+    const b = await makePromoter();
+    await prisma.promoterProfile.update({ where: { userId: a }, data: { fullName: 'Ada Okafor' } });
+    await http().post(`/admin/promoters/${a}/points`).set(bearer(adminId, [Role.ADMIN])).send({ points: 400, reason: 'seed a' }).expect(201);
+    await http().post(`/admin/promoters/${b}/points`).set(bearer(adminId, [Role.ADMIN])).send({ points: 100, reason: 'seed b' }).expect(201);
+
+    const res = await http().get('/admin/leaderboard').set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect(res.body.total).toBe(2);
+    expect(res.body.rows[0]).toMatchObject({ rank: 1, promoter_id: a, full_name: 'Ada Okafor', season_points: 400 });
+    expect(res.body.rows[1]).toMatchObject({ rank: 2, promoter_id: b, season_points: 100 });
+  });
+
+  it('reads and updates leaderboard rules, and audits the change', async () => {
+    const adminId = await makeAdmin();
+    const before = await http().get('/admin/leaderboard-config').set(bearer(adminId, [Role.ADMIN])).expect(200);
+    expect(before.body.pts_delivery_completed).toBe(50);
+    expect(before.body.tier_gold_at).toBe(800);
+
+    const after = await http().patch('/admin/leaderboard-config').set(bearer(adminId, [Role.ADMIN])).send({ pts_delivery_completed: 75, tier_gold_at: 1000 }).expect(200);
+    expect(after.body.pts_delivery_completed).toBe(75);
+    expect(after.body.tier_gold_at).toBe(1000);
+    expect(await prisma.auditLog.count({ where: { action: 'leaderboard_config.update' } })).toBe(1);
+  });
+
+  it('adjusts a promoter’s points manually and audits it', async () => {
+    const adminId = await makeAdmin();
+    const promoterId = await makePromoter();
+    const res = await http().post(`/admin/promoters/${promoterId}/points`).set(bearer(adminId, [Role.ADMIN])).send({ points: 120, reason: 'Compensating a proof lost in review.' }).expect(201);
+    expect(res.body.lifetime_points).toBe(120);
+
+    const ev = await prisma.pointEvent.findFirstOrThrow({ where: { promoterId, type: 'ADJUSTMENT' } });
+    expect(ev.points).toBe(120);
+    expect(await prisma.auditLog.count({ where: { action: 'leaderboard.adjust' } })).toBe(1);
+    // Unknown promoter → 404.
+    await http().post(`/admin/promoters/${randomUUID()}/points`).set(bearer(adminId, [Role.ADMIN])).send({ points: 10, reason: 'x reason' }).expect(404);
   });
 
   it('returns platform analytics with status breakdowns', async () => {

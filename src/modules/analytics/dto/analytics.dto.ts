@@ -23,8 +23,14 @@ export class EvidenceItemDto {
   @ApiProperty({ format: 'date-time' })
   submitted_at!: string;
 
-  @ApiProperty({ example: 3210, description: 'Non-bot clicks on this promoter’s link.' })
+  @ApiProperty({ example: 842, description: 'The views this promoter reported on their post — admin-verified once approved, otherwise the promoter’s own figure (see views_verified).' })
   views!: number;
+
+  @ApiProperty({ example: true, description: 'True when `views` is the admin-verified figure; false when it is still the promoter’s reported number, pending review.' })
+  views_verified!: boolean;
+
+  @ApiProperty({ example: 3210, description: 'Non-bot clicks the platform recorded on this promoter’s tracking link — a separate signal from the post’s view count.' })
+  clicks!: number;
 
   @ApiProperty({ enum: ['PENDING', 'APPROVED', 'REJECTED'] })
   verdict!: string;
@@ -84,6 +90,12 @@ export class CampaignAnalyticsDto {
 
   @ApiProperty({ example: 60 })
   slots_total!: number;
+
+  @ApiProperty({ example: 60000, description: 'Total effective reach the client paid for.' })
+  target_reach!: number;
+
+  @ApiProperty({ example: 103, description: 'Verified reach delivered ÷ target, as a percent (can exceed 100).' })
+  success_rate_pct!: number;
 
   @ApiProperty({ type: [EvidenceItemDto] })
   evidence!: EvidenceItemDto[];

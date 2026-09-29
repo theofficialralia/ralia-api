@@ -5,7 +5,7 @@ import { NotificationService } from './notification.service';
 /**
  * Emails the PENDING notification backlog every 30s. Separate from the allocation
  * sweep so delivery is timely and independent, and only wired where
- * ScheduleModule.forRoot() is (AppModule) — specs exercise dispatchPending directly.
+ * ScheduleModule.forRoot() is (AppModule) - specs exercise dispatchPending directly.
  */
 @Injectable()
 export class NotificationScheduler {

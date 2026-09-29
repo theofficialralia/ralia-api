@@ -67,7 +67,7 @@ describe('NotificationService (N-1)', () => {
     expect(n.readAt).toBeNull();
   });
 
-  it('is idempotent on dedupeKey — a second create is silently ignored', async () => {
+  it('is idempotent on dedupeKey - a second create is silently ignored', async () => {
     const userId = await makeUser();
     const key = `offer.created:${userId}:abc`;
     await service.create({ userId, type: 'offer.created', title: 'A', body: 'A', dedupeKey: key });
@@ -98,6 +98,21 @@ describe('NotificationService (N-1)', () => {
     expect(n.emailStatus).toBe(NotificationEmailStatus.SENT);
     expect(n.emailedAt).not.toBeNull();
     expect(n.emailAttempts).toBe(1);
+  });
+
+  it('renders multi-paragraph bodies as separate blocks and adds the type’s CTA', async () => {
+    const userId = await makeUser();
+    await service.create({ userId, type: 'welcome.client', title: 'Welcome to Ralia!', body: 'First para.\n\nSecond para.' });
+
+    await service.dispatchPending(new Date());
+    const sent = mailer.sent[0]!;
+    expect(sent.subject).toBe('Welcome to Ralia!');
+    // Both paragraphs made it into the HTML as distinct blocks.
+    expect(sent.html).toContain('First para.');
+    expect(sent.html).toContain('Second para.');
+    // The welcome.client CTA points at the client app's new-campaign screen.
+    expect(sent.text).toContain('Create your first campaign');
+    expect(sent.text).toMatch(/\/campaigns\/new/);
   });
 
   it('retries on failure and gives up as FAILED after the attempt cap', async () => {
@@ -151,7 +166,7 @@ describe('NotificationService (N-1)', () => {
       const aNote = await prisma.notification.findFirstOrThrow({ where: { userId: a } });
       const bNote = await prisma.notification.findFirstOrThrow({ where: { userId: b } });
 
-      // A tries to mark B's notification — the userId scope means nothing changes.
+      // A tries to mark B's notification - the userId scope means nothing changes.
       await service.markRead(a, bNote.id, new Date());
       expect((await prisma.notification.findUniqueOrThrow({ where: { id: bNote.id } })).readAt).toBeNull();
 

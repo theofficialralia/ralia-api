@@ -1,9 +1,14 @@
-import { ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { CampaignStatus, ClientOrg, ClientOrgStatus, Prisma } from '@prisma/client';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { STORAGE, StorageProvider } from '../../common/storage/storage';
 import { AuditService } from '../admin/audit.service';
 import { ClientProfileDto, ClientSocialDto, UpdateClientProfileDto } from './dto/client-profile.dto';
+
+/** A logo is a small image; keep the cap well below the 10 MB asset limit. */
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+const LOGO_MIME: Record<string, true> = { 'image/jpeg': true, 'image/png': true, 'image/webp': true, 'image/gif': true };
 
 /** Campaign states where money or promoter work is still in flight. */
 const ACTIVE_STATES: CampaignStatus[] = [
@@ -25,12 +30,40 @@ export class ClientsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    @Inject(STORAGE) private readonly storage: StorageProvider,
   ) {}
 
   private async orgFor(userId: string): Promise<ClientOrg> {
     const org = await this.prisma.clientOrg.findFirst({ where: { ownerUserId: userId } });
     if (!org) throw new ForbiddenException('This account has no client organisation.');
     return org;
+  }
+
+  /** Upload (or replace) the business logo and return the refreshed profile. */
+  async uploadLogo(userId: string, file: { buffer: Buffer; mimetype: string; size: number } | undefined): Promise<ClientProfileDto> {
+    if (!file) throw new BadRequestException('A logo image is required.');
+    if (file.size > LOGO_MAX_BYTES) throw new BadRequestException('The logo must be 2 MB or smaller.');
+    if (!LOGO_MIME[file.mimetype]) throw new BadRequestException(`Unsupported image type ${file.mimetype}. Use JPG, PNG, WebP or GIF.`);
+
+    const org = await this.orgFor(userId);
+    const key = `orgs/${org.id}/logo/${randomUUID()}`;
+    const stored = await this.storage.put(key, file.buffer, file.mimetype);
+
+    await this.prisma.$transaction(async (tx) => {
+      const fileRow = await tx.file.create({
+        data: {
+          storageKey: stored.key,
+          bucket: stored.bucket,
+          mimeType: stored.mimeType,
+          sizeBytes: stored.sizeBytes,
+          checksumSha256: stored.checksumSha256,
+          uploadedBy: userId,
+        },
+      });
+      await tx.clientOrg.update({ where: { id: org.id }, data: { logoFileId: fileRow.id } });
+    });
+
+    return this.me(userId);
   }
 
   async me(userId: string): Promise<ClientProfileDto> {
@@ -139,6 +172,7 @@ function toDto(org: ClientOrg, email: string): ClientProfileDto {
     support_contact_phone: org.supportContactPhone,
     description: org.description,
     socials: (org.socials as unknown as ClientSocialDto[] | null) ?? null,
+    logo_url: org.logoFileId ? `/v1/files/${org.logoFileId}` : null,
     status: org.status,
   };
 }

@@ -1,6 +1,7 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Patch } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Patch, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Role } from '@prisma/client';
-import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/auth/current-user.decorator';
 import { AuthedUser } from '../../common/auth/jwt-auth.guard';
 import { Roles } from '../../common/auth/roles.guard';
@@ -26,6 +27,16 @@ export class ClientsController {
   @ApiOkResponse({ type: ClientProfileDto })
   update(@CurrentUser() user: AuthedUser, @Body() dto: UpdateClientProfileDto): Promise<ClientProfileDto> {
     return this.clients.update(user.id, dto);
+  }
+
+  @Post('logo')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Upload the business logo', description: 'Image only (JPG/PNG/WebP/GIF), ≤2 MB. Replaces any existing logo.' })
+  @ApiBody({ schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' } }, required: ['file'] } })
+  @ApiOkResponse({ type: ClientProfileDto })
+  uploadLogo(@CurrentUser() user: AuthedUser, @UploadedFile() file?: Express.Multer.File): Promise<ClientProfileDto> {
+    return this.clients.uploadLogo(user.id, file ? { buffer: file.buffer, mimetype: file.mimetype, size: file.size } : undefined);
   }
 
   @Delete()

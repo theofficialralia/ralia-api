@@ -12,6 +12,7 @@ import {
   Platform,
   PromoterRole,
   PromoterStatus,
+  PromoterTier,
   PrismaClient,
   Role,
   SlotStatus,
@@ -92,7 +93,7 @@ describe('matching — candidates, offers, accept', () => {
     return admin.id;
   }
 
-  async function makeLiveCampaign(slots: number, opts: { minReach?: number; platform?: Platform; state?: string } = {}): Promise<string> {
+  async function makeLiveCampaign(slots: number, opts: { minReach?: number; platform?: Platform; state?: string; destination?: string | null; minTier?: PromoterTier } = {}): Promise<string> {
     const owner = await prisma.user.create({
       data: { email: `c${seq++}@x.com`, phoneE164: `+23481${String(seq).padStart(8, '0')}`, passwordHash: 'x', status: 'ACTIVE', roles: { create: { role: Role.CLIENT } } },
     });
@@ -100,7 +101,8 @@ describe('matching — candidates, offers, accept', () => {
     const campaign = await prisma.campaign.create({
       data: {
         clientOrgId: org.id, name: `Camp${seq}`, objective: CampaignObjective.AWARENESS,
-        destinationUrl: 'https://x.example/go', status: CampaignStatus.LIVE,
+        destinationUrl: opts.destination === undefined ? 'https://x.example/go' : opts.destination, status: CampaignStatus.LIVE,
+        minTier: opts.minTier ?? null,
         budgetMinor: 34500n, priceMinor: 34500n, slotsTotal: slots, quotedAt: new Date(),
         targeting: {
           create: {
@@ -115,7 +117,7 @@ describe('matching — candidates, offers, accept', () => {
     return campaign.id;
   }
 
-  async function makePromoter(opts: { state?: string; platform?: Platform; claimed?: number; trust?: number; age?: number } = {}): Promise<{ userId: string; channelId: string }> {
+  async function makePromoter(opts: { state?: string; platform?: Platform; claimed?: number; trust?: number; age?: number; tier?: PromoterTier } = {}): Promise<{ userId: string; channelId: string }> {
     const platform = opts.platform ?? Platform.INSTAGRAM;
     const claimed = opts.claimed ?? 20_000;
     const user = await prisma.user.create({
@@ -125,7 +127,7 @@ describe('matching — candidates, offers, accept', () => {
       data: {
         userId: user.id, status: PromoterStatus.ACTIVE, age: opts.age ?? 25,
         locationState: opts.state ?? 'Lagos', languagesSpoken: ['English'], preferredCategories: ['Fashion'],
-        trustScore: opts.trust ?? 60, maxCampaignsPerWeek: 3,
+        trustScore: opts.trust ?? 60, maxCampaignsPerWeek: 3, tier: opts.tier ?? 'BRONZE',
       },
     });
     const channel = await prisma.channel.create({
@@ -214,6 +216,22 @@ describe('matching — candidates, offers, accept', () => {
     expect(offer!.status).toBe(OfferStatus.ACCEPTED);
   });
 
+  it('creates no tracking link when the campaign has no destination (never a dead /r link)', async () => {
+    const campaignId = await makeLiveCampaign(2, { destination: null });
+    const p = await makePromoter();
+    const offerId = await sendOffer(campaignId, p.userId);
+
+    const a = await matching.accept(offerId, p.userId);
+    expect(a.tracking_token).toBeTruthy(); // the assignment still has its token
+    // …but no shareable link row exists, so the promoter is never handed a /r link
+    // that would resolve to nothing.
+    expect(await prisma.trackingLink.findUnique({ where: { assignmentId: a.id } })).toBeNull();
+
+    // And the assignment detail surfaces tracking_url as null (UI hides the step).
+    const detail = await matching.assignmentDetail(p.userId, a.id);
+    expect(detail.tracking_url).toBeNull();
+  });
+
   it('declining an offer leaves slots untouched', async () => {
     const campaignId = await makeLiveCampaign(2);
     const p = await makePromoter();
@@ -260,6 +278,18 @@ describe('matching — candidates, offers, accept', () => {
     const candidates = await matching.candidates(campaignId);
     expect(candidates).toHaveLength(1);
     expect(candidates[0]!.promoter_id).toBe(good.userId);
+  });
+
+  it('gates a campaign by minimum tier — below-tier promoters are excluded', async () => {
+    const campaignId = await makeLiveCampaign(10, { minTier: 'GOLD' });
+
+    const gold = await makePromoter({ tier: 'GOLD' });
+    const platinum = await makePromoter({ tier: 'PLATINUM' }); // above the bar → eligible
+    await makePromoter({ tier: 'SILVER' }); // below the bar → excluded
+    await makePromoter({ tier: 'BRONZE' }); // below the bar → excluded
+
+    const ids = (await matching.candidates(campaignId)).map((c) => c.promoter_id);
+    expect(ids.sort()).toEqual([gold.userId, platinum.userId].sort());
   });
 
   it('excludes promoters already offered or assigned on the campaign', async () => {

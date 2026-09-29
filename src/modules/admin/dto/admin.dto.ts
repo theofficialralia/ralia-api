@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { KycStatus, ReconciliationStatus, VerificationTier } from '@prisma/client';
+import { AdminCapability, KycStatus, ReconciliationStatus, VerificationTier } from '@prisma/client';
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsEnum, IsIn, IsInt, IsObject, IsOptional, IsPositive, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { ArrayUnique, IsArray, IsBoolean, IsEmail, IsEnum, IsIn, IsInt, IsObject, IsOptional, IsPositive, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { MoneyDto } from '../../ledger/money';
 
 /** Rejecting anything requires a reason (§6). */
@@ -31,6 +31,44 @@ export class SetCapabilityDto {
   })
   @IsObject()
   scores!: Record<string, number>;
+}
+
+/** Invite someone to the admin team with a capability set (§7 RBAC). */
+export class InviteAdminDto {
+  @ApiProperty({ example: 'newadmin@ralia.co' })
+  @IsEmail()
+  @MaxLength(200)
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  email!: string;
+
+  @ApiProperty({ enum: AdminCapability, isArray: true, example: [AdminCapability.REVIEW_EVIDENCE] })
+  @IsArray()
+  @ArrayUnique()
+  @IsEnum(AdminCapability, { each: true })
+  capabilities!: AdminCapability[];
+}
+
+/** Replace an admin's capability set. */
+export class UpdateAdminCapabilitiesDto {
+  @ApiProperty({ enum: AdminCapability, isArray: true, example: [AdminCapability.REVIEW_EVIDENCE, AdminCapability.RECORD_MONEY] })
+  @IsArray()
+  @ArrayUnique()
+  @IsEnum(AdminCapability, { each: true })
+  capabilities!: AdminCapability[];
+}
+
+/** Accept an admin invitation and set a password. Public. */
+export class AcceptAdminInviteDto {
+  @ApiProperty({ description: 'The token from the invite link.' })
+  @IsString()
+  @MaxLength(200)
+  token!: string;
+
+  @ApiProperty({ example: 'a long enough passphrase', minLength: 10 })
+  @IsString()
+  @MinLength(10)
+  @MaxLength(200)
+  password!: string;
 }
 
 /** Admin sets a promoter's KYC state after reviewing their ID evidence (§10). */

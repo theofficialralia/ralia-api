@@ -1,7 +1,7 @@
 import { Mailer, MailMessage } from './mailer';
 
 /**
- * Resend transport (staging/prod). Uses the HTTP API directly via global fetch —
+ * Resend transport (staging/prod). Uses the HTTP API directly via global fetch -
  * no SDK dependency. A non-2xx response throws so the dispatch sweep retries.
  */
 export class ResendMailer implements Mailer {
