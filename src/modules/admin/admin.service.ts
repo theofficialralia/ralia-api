@@ -2122,6 +2122,46 @@ export class AdminService {
       revenue = cr - dr;
     }
 
+    // Weekly revenue vs commissions: the last 7 days, Revenue = client money funded
+    // that day (gateway payments), Profit = the platform revenue account's net that
+    // day. Bucketed in Africa/Lagos so day boundaries match the business's clock.
+    const TZ = 'Africa/Lagos';
+    const dayKey = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d); // YYYY-MM-DD
+    const dayLabel = (d: Date) => d.toLocaleDateString('en-NG', { weekday: 'short', timeZone: TZ });
+    const now = new Date();
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(now.getTime() - (6 - i) * 86_400_000);
+      return { key: dayKey(d), label: dayLabel(d) };
+    });
+    const windowStart = new Date(now.getTime() - 7 * 86_400_000);
+
+    const revByDay = new Map<string, bigint>();
+    const payments = await this.prisma.gatewayPayment.findMany({
+      where: { createdAt: { gte: windowStart } },
+      select: { gatewayMinor: true, createdAt: true },
+    });
+    for (const p of payments) revByDay.set(dayKey(p.createdAt), (revByDay.get(dayKey(p.createdAt)) ?? 0n) + p.gatewayMinor);
+
+    const profitByDay = new Map<string, bigint>();
+    if (revenueAcc) {
+      const entries = await this.prisma.ledgerEntry.findMany({
+        where: { accountId: revenueAcc.id, createdAt: { gte: windowStart } },
+        select: { direction: true, amountMinor: true, createdAt: true },
+      });
+      for (const e of entries) {
+        const k = dayKey(e.createdAt);
+        const signed = e.direction === EntryDirection.CREDIT ? e.amountMinor : -e.amountMinor;
+        profitByDay.set(k, (profitByDay.get(k) ?? 0n) + signed);
+      }
+    }
+
+    const weekly_revenue = days.map((d) => ({
+      day: d.label,
+      date: d.key,
+      revenue: toMoney(revByDay.get(d.key) ?? 0n),
+      profit: toMoney(profitByDay.get(d.key) ?? 0n),
+    }));
+
     return {
       gmv: toMoney(gmv._sum.priceMinor ?? 0n),
       revenue: toMoney(revenue),
@@ -2133,6 +2173,7 @@ export class AdminService {
       campaigns_by_status: campaignsByStatus.map((r) => ({ status: r.status, count: r._count._all })),
       spend_by_category,
       promoter_performance,
+      weekly_revenue,
     };
   }
 }
